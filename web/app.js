@@ -8,11 +8,17 @@ let productionChart = null;
 
 // ==================== NAVEGAÇÃO ====================
 
-document.querySelectorAll('.nav-item').forEach(item => {
-    item.addEventListener('click', () => {
-        const page = item.dataset.page;
-        navigateTo(page);
+// Espera DOM carregar antes de adicionar eventos
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const page = item.dataset.page;
+            navigateTo(page);
+        });
     });
+    
+    // Inicializa estado
+    initApp();
 });
 
 function navigateTo(page) {
@@ -477,10 +483,13 @@ function copyEndpoint() {
 
 // ==================== INIT ====================
 
-window.addEventListener('load', async () => {
+async function initApp() {
     // Começa na tela de login
     document.body.classList.add('logged-out');
-    document.getElementById('sidebar').style.display = 'none';
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar) {
+        sidebar.style.display = 'none';
+    }
     
     try {
         const response = await fetch(`${API_BASE}/health`);
@@ -490,4 +499,4 @@ window.addEventListener('load', async () => {
     } catch (error) {
         console.error('❌ Servidor offline:', error);
     }
-});
+}
