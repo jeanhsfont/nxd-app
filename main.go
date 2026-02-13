@@ -58,7 +58,10 @@ func main() {
 	handler := c.Handler(router)
 
 	// Inicia servidor
-	port := "8080"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 	log.Printf("✓ Servidor rodando em http://localhost:%s", port)
 	log.Println("✓ Endpoints disponíveis:")
 	log.Println("  - POST /api/ingest (Recebe dados do DX)")
