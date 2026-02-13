@@ -1,4 +1,5 @@
-const API_BASE = 'http://localhost:8080/api';
+// Detecta automaticamente a URL base (funciona local e na nuvem)
+const API_BASE = window.location.origin + '/api';
 let currentAPIKey = null;
 let refreshInterval = null;
 
