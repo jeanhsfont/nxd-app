@@ -1,0 +1,5 @@
+simulator/
+*.bat
+*.md
+docs/
+NXD_OPS_KIT/

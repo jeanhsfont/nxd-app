@@ -1,15 +1,17 @@
 [variables]
 PORT = "8080"
 CGO_ENABLED = "1"
+GO111MODULE = "on"
+GOFLAGS = "-mod=mod"
 
 [phases.setup]
 nixPkgs = ["go_1_21", "gcc", "sqlite", "pkg-config"]
 
 [phases.install]
-cmds = ["go mod download"]
+cmds = ["GO111MODULE=on go mod download"]
 
 [phases.build]
-cmds = ["go build -ldflags='-s -w' -o hub_server ."]
+cmds = ["GO111MODULE=on CGO_ENABLED=1 go build -ldflags='-s -w' -o hub_server ."]
 
 [start]
 cmd = "./hub_server"
