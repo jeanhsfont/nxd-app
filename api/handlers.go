@@ -332,6 +332,102 @@ func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// HealthStatusHandler retorna o status de conexão das máquinas
+func HealthStatusHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		http.Error(w, "API Key não fornecida", http.StatusBadRequest)
+		return
+	}
+
+	factory, err := data.GetFactoryByAPIKey(apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		return
+	}
+
+	statuses, err := services.GetMachineHealthStatus(factory.ID)
+	if err != nil {
+		http.Error(w, "Erro ao buscar status", http.StatusInternalServerError)
+		return
+	}
+
+	// Conta status
+	online := 0
+	offline := 0
+	critical := 0
+	for _, s := range statuses {
+		switch s.Status {
+		case "online":
+			online++
+		case "offline":
+			offline++
+		case "critical":
+			critical++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory":      factory.Name,
+		"total":        len(statuses),
+		"online":       online,
+		"offline":      offline,
+		"critical":     critical,
+		"machines":     statuses,
+		"timestamp":    time.Now().Format(time.RFC3339),
+		"message":      getOverallHealthMessage(online, offline, critical),
+		"nxd_status":   "operational", // NXD sempre operacional se responder
+		"responsibility": map[string]string{
+			"nxd":    "Servidor NXD operacional. Dados que chegam são processados corretamente.",
+			"dx":     "Se máquina está offline, verifique: energia do DX, sinal 4G, configuração.",
+			"notice": "O NXD só pode processar dados que chegam na API. Problemas de conexão são responsabilidade do ambiente da fábrica.",
+		},
+	})
+}
+
+func getOverallHealthMessage(online, offline, critical int) string {
+	if critical > 0 {
+		return "🚨 ATENÇÃO: Há máquinas sem comunicação há muito tempo. Verifique os módulos DX."
+	}
+	if offline > 0 {
+		return "⚠️ Algumas máquinas estão offline. Pode ser problema no DX ou na rede da fábrica."
+	}
+	return "✅ Todas as máquinas comunicando normalmente."
+}
+
+// ConnectionLogsHandler retorna os logs de conexão/desconexão
+func ConnectionLogsHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		http.Error(w, "API Key não fornecida", http.StatusBadRequest)
+		return
+	}
+
+	factory, err := data.GetFactoryByAPIKey(apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		return
+	}
+
+	// Pega limite (default 100)
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+	}
+
+	logs := services.GetConnectionLogs(limit)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory":   factory.Name,
+		"logs":      logs,
+		"count":     len(logs),
+		"timestamp": time.Now().Format(time.RFC3339),
+		"notice":    "Estes logs mostram quando máquinas conectaram/desconectaram. Use para diagnóstico de problemas de rede.",
+	})
+}
+
 // DeleteMachineHandler remove uma máquina específica
 func DeleteMachineHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {

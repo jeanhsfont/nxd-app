@@ -37,6 +37,9 @@ func main() {
 	// Configura rotas
 	router := mux.NewRouter()
 
+	// Inicia monitor de saúde das máquinas
+	services.StartHealthMonitor()
+
 	// API Routes
 	router.HandleFunc("/api/health", api.HealthHandler).Methods("GET")
 	router.HandleFunc("/api/ingest", api.IngestHandler).Methods("POST")
@@ -44,6 +47,8 @@ func main() {
 	router.HandleFunc("/api/dashboard", api.GetDashboardHandler).Methods("GET")
 	router.HandleFunc("/api/analytics", api.AnalyticsHandler).Methods("GET")
 	router.HandleFunc("/api/machine/delete", api.DeleteMachineHandler).Methods("DELETE")
+	router.HandleFunc("/api/connection/status", api.HealthStatusHandler).Methods("GET")
+	router.HandleFunc("/api/connection/logs", api.ConnectionLogsHandler).Methods("GET")
 	router.HandleFunc("/ws", api.WebSocketHandler)
 
 	// Serve arquivos estáticos (Dashboard)
@@ -69,6 +74,9 @@ func main() {
 	log.Println("  - POST /api/ingest (Recebe dados do DX)")
 	log.Println("  - POST /api/factory/create (Cria nova fábrica)")
 	log.Println("  - GET  /api/dashboard?api_key=XXX (Dashboard)")
+	log.Println("  - GET  /api/analytics?api_key=XXX (Analytics)")
+	log.Println("  - GET  /api/connection/status?api_key=XXX (Status de Conexão)")
+	log.Println("  - GET  /api/connection/logs?api_key=XXX (Logs de Conexão)")
 	log.Println("  - GET  /api/health (Health check)")
 	log.Println("  - WS   /ws (WebSocket)")
 
