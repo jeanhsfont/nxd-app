@@ -1,0 +1,14 @@
+[variables]
+PORT = "8080"
+
+[phases.setup]
+nixPkgs = ["go", "gcc", "sqlite", "pkg-config"]
+
+[phases.build]
+cmds = [
+  "go mod download",
+  "CGO_ENABLED=1 go build -o hub_server ."
+]
+
+[start]
+cmd = "./hub_server"
