@@ -332,6 +332,46 @@ func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DeleteMachineHandler remove uma máquina específica
+func DeleteMachineHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+		return
+	}
+
+	apiKey := r.URL.Query().Get("api_key")
+	machineIDStr := r.URL.Query().Get("machine_id")
+
+	if apiKey == "" || machineIDStr == "" {
+		http.Error(w, "API Key e machine_id são obrigatórios", http.StatusBadRequest)
+		return
+	}
+
+	var machineID int
+	fmt.Sscanf(machineIDStr, "%d", &machineID)
+
+	// Valida API Key
+	factory, err := data.GetFactoryByAPIKey(apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "Fábrica não encontrada", http.StatusUnauthorized)
+		return
+	}
+
+	// Deleta a máquina
+	if err := data.DeleteMachine(machineID); err != nil {
+		http.Error(w, "Erro ao deletar máquina", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("🗑️  Máquina ID %d removida da fábrica %s", machineID, factory.Name)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Máquina %d removida com sucesso", machineID),
+	})
+}
+
 // Funções auxiliares de parsing
 func parseBool(s string) bool {
 	return s == "true" || s == "1"

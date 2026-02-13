@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log"
 	"math"
 	"math/rand"
@@ -31,11 +30,11 @@ const (
 
 // Estrutura de dados para envio
 type DataPayload struct {
-	APIKey    string             `json:"api_key"`
-	MachineID string             `json:"machine_id"`
-	Brand     string             `json:"brand"`
-	Model     string             `json:"model"`
-	Tags      map[string]interface{} `json:"tags"`
+	APIKey   string                 `json:"api_key"`
+	DeviceID string                 `json:"device_id"`
+	Brand    string                 `json:"brand"`
+	Protocol string                 `json:"protocol"`
+	Tags     map[string]interface{} `json:"tags"`
 }
 
 // Estado de cada máquina
@@ -230,7 +229,7 @@ func processEvents(factoryMinutes float64) {
 	}
 
 	// Verifica fim de eventos de parada
-	for id, machine := range machines {
+	for _, machine := range machines {
 		if !machine.Running && machine.UltimaParada.Add(time.Duration(machine.TempoParada/TIME_SCALE)*time.Second).Before(time.Now()) {
 			machine.Running = true
 			factoryHour := 8 + int(factoryMinutes/60)
@@ -331,10 +330,10 @@ func updateMachine(machine *MachineState, factoryMinutes float64) {
 
 func sendData(id string, machine *MachineState, hour, min int) {
 	payload := DataPayload{
-		APIKey:    apiKey,
-		MachineID: id,
-		Brand:     machine.Brand,
-		Model:     machine.Model,
+		APIKey:   apiKey,
+		DeviceID: id,
+		Brand:    machine.Brand,
+		Protocol: "Modbus",
 		Tags: map[string]interface{}{
 			"Status_Producao":    machine.Running,
 			"Temperatura_Molde":  math.Round(machine.Temperature*10) / 10,

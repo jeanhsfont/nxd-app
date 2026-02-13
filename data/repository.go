@@ -218,6 +218,23 @@ func GetTagsByMachine(machineID int) ([]core.Tag, error) {
 	return tags, nil
 }
 
+// DeleteMachine remove uma máquina e todos os dados relacionados
+func DeleteMachine(machineID int) error {
+	// Remove data_points
+	_, err := DB.Exec("DELETE FROM data_points WHERE machine_id = ?", machineID)
+	if err != nil {
+		return err
+	}
+	// Remove tags
+	_, err = DB.Exec("DELETE FROM tags WHERE machine_id = ?", machineID)
+	if err != nil {
+		return err
+	}
+	// Remove machine
+	_, err = DB.Exec("DELETE FROM machines WHERE id = ?", machineID)
+	return err
+}
+
 // GetLatestDataPoints retorna os últimos valores de todas as tags de uma máquina
 func GetLatestDataPoints(machineID int) (map[string]string, error) {
 	rows, err := DB.Query(

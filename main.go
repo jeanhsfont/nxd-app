@@ -43,6 +43,7 @@ func main() {
 	router.HandleFunc("/api/factory/create", api.CreateFactoryHandler).Methods("POST")
 	router.HandleFunc("/api/dashboard", api.GetDashboardHandler).Methods("GET")
 	router.HandleFunc("/api/analytics", api.AnalyticsHandler).Methods("GET")
+	router.HandleFunc("/api/machine/delete", api.DeleteMachineHandler).Methods("DELETE")
 	router.HandleFunc("/ws", api.WebSocketHandler)
 
 	// Serve arquivos estáticos (Dashboard)
