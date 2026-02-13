@@ -235,7 +235,7 @@ func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type MachineAnalytics struct {
-		ID              int64   `json:"id"`
+		ID              int     `json:"id"`
 		Name            string  `json:"name"`
 		Brand           string  `json:"brand"`
 		Status          bool    `json:"status"`
