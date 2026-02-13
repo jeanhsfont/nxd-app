@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NXD - Nexus Data Exchange</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏭 NXD</h1>
+            <p class="subtitle">Nexus Data Exchange - Inteligência Industrial em Tempo Real</p>
+        </header>
+
+        <div id="setup-section" class="section">
+            <h2>🔧 Configuração Inicial</h2>
+            <div class="card">
+                <h3>Criar Nova Fábrica</h3>
+                <input type="text" id="factory-name" placeholder="Nome da Fábrica" />
+                <button onclick="createFactory()">Criar Fábrica</button>
+                <div id="api-key-result"></div>
+            </div>
+
+            <div class="card">
+                <h3>Acessar Dashboard</h3>
+                <input type="text" id="api-key-input" placeholder="Cole sua API Key aqui" />
+                <button onclick="loadDashboard()">Carregar Dashboard</button>
+            </div>
+        </div>
+
+        <div id="dashboard-section" class="section" style="display: none;">
+            <div class="dashboard-header">
+                <h2>📊 Dashboard</h2>
+                <div class="factory-info">
+                    <span id="factory-name-display"></span>
+                    <button onclick="logout()">Sair</button>
+                </div>
+            </div>
+
+            <div id="machines-grid" class="machines-grid">
+                <!-- Cards de máquinas serão inseridos aqui -->
+            </div>
+
+            <div id="no-machines" style="display: none;" class="card">
+                <p>⏳ Aguardando dados do DX...</p>
+                <p>Configure o módulo DX com a API Key e os dados aparecerão automaticamente aqui.</p>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

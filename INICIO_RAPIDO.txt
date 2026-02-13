@@ -1,0 +1,217 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                                                           ║
+║                    🚀 INÍCIO RÁPIDO - HUB SYSTEM                          ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃                                                                         ┃
+┃  ⚡ MÉTODO MAIS RÁPIDO (Primeira Vez)                                  ┃
+┃                                                                         ┃
+┃  1️⃣  Clique em: BUILD.bat                                              ┃
+┃     → Aguarde 2-5 minutos (compila tudo)                               ┃
+┃                                                                         ┃
+┃  2️⃣  Clique em: START.bat                                              ┃
+┃     → Aguarde 30 segundos                                              ┃
+┃     → Crie fábrica no navegador                                        ┃
+┃     → Copie API Key                                                    ┃
+┃                                                                         ┃
+┃  3️⃣  Crie arquivo .env com:                                            ┃
+┃     API_KEY=sua_chave_aqui                                             ┃
+┃                                                                         ┃
+┃  4️⃣  Clique em: START.bat novamente                                    ┃
+┃     → Veja as máquinas aparecerem!                                     ┃
+┃                                                                         ┃
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+
+
+═══════════════════════════════════════════════════════════════════════════
+ 📋 PRÉ-REQUISITOS
+═══════════════════════════════════════════════════════════════════════════
+
+ ✓ Docker Desktop instalado
+ ✓ Docker Desktop RODANDO (ícone verde)
+ ✓ Conexão com internet (para baixar imagens)
+ ✓ ~2GB de espaço em disco
+
+
+═══════════════════════════════════════════════════════════════════════════
+ 🔨 OPÇÃO 1: Build Separado (Recomendado)
+═══════════════════════════════════════════════════════════════════════════
+
+ Passo 1: Compilar
+ ─────────────────
+ Clique em: BUILD.bat
+ 
+ O que faz:
+  • Verifica Docker
+  • Prepara dependências
+  • Compila imagens Docker
+  • Tempo: 2-5 minutos
+
+ Passo 2: Iniciar Servidor
+ ──────────────────────────
+ Clique em: START.bat
+ 
+ O que faz:
+  • Inicia servidor HUB
+  • Abre navegador
+  • Aguarda você criar fábrica
+
+ Passo 3: Configurar
+ ────────────────────
+ No navegador:
+  • Digite nome da fábrica
+  • Clique "Criar Fábrica"
+  • COPIE a API Key
+
+ Crie arquivo .env:
+  API_KEY=HUB_abc123...
+
+ Passo 4: Iniciar Completo
+ ──────────────────────────
+ Clique em: START.bat novamente
+ 
+ O que faz:
+  • Inicia servidor + simulador
+  • Abre navegador
+  • Máquinas aparecem em 10-15 segundos
+
+
+═══════════════════════════════════════════════════════════════════════════
+ ⚡ OPÇÃO 2: Tudo de Uma Vez (Mais Demorado)
+═══════════════════════════════════════════════════════════════════════════
+
+ Clique em: START.bat
+ 
+ O script faz tudo automaticamente:
+  1. Verifica Docker
+  2. Compila imagens (se necessário)
+  3. Inicia servidor
+  4. Abre navegador
+  5. Aguarda você configurar
+
+ ⏳ Tempo total: 3-6 minutos na primeira vez
+
+
+═══════════════════════════════════════════════════════════════════════════
+ ⏱️ TEMPOS ESPERADOS
+═══════════════════════════════════════════════════════════════════════════
+
+ Primeira Vez:
+ ─────────────
+ • BUILD.bat:           2-5 minutos
+ • START.bat:           30-60 segundos
+ • Máquinas aparecem:   10-15 segundos
+ • Total:               3-7 minutos
+
+ Próximas Vezes:
+ ───────────────
+ • START.bat:           5-10 segundos
+ • Máquinas aparecem:   5-10 segundos
+ • Total:               10-20 segundos
+
+
+═══════════════════════════════════════════════════════════════════════════
+ 🎯 O QUE VOCÊ VAI VER
+═══════════════════════════════════════════════════════════════════════════
+
+ Dashboard: http://localhost:8080
+
+ Máquina 1: Siemens_CLP_SIEMENS_01
+ ──────────────────────────────────
+ • Temperatura_Motor: 45-65°C
+ • Pressao_Hidraulica: 120-150 bar
+ • Velocidade_RPM: 1500-2000
+ • Status_Producao: true/false
+ • Contador_Pecas: 0-10000
+ • Alarme_Temperatura: true/false
+
+ Máquina 2: Delta_CLP_DELTA_01
+ ──────────────────────────────
+ • Temp_Ambiente: 20-35°C
+ • Corrente_Motor_A: 5-15A
+ • Tensao_Rede_V: 220-230V
+ • Ciclos_Completos: 0-5000
+ • Modo_Operacao: AUTO/MANUAL/SETUP
+ • Falha_Comunicacao: true/false
+
+ ✨ Valores atualizam a cada 2-3 segundos!
+
+
+═══════════════════════════════════════════════════════════════════════════
+ 🆘 PROBLEMAS COMUNS
+═══════════════════════════════════════════════════════════════════════════
+
+ ❌ "Docker não está rodando"
+    → Abra Docker Desktop
+    → Aguarde ícone ficar verde
+    → Tente novamente
+
+ ❌ "Erro ao compilar"
+    → Execute: BUILD.bat
+    → Veja os erros
+    → Consulte: TROUBLESHOOTING.md
+
+ ❌ "Unable to connect"
+    → Aguarde mais 30 segundos
+    → Atualize página (F5)
+    → Veja logs: docker-compose logs
+
+ ❌ "Máquinas não aparecem"
+    → Verifique arquivo .env
+    → Aguarde 15 segundos
+    → Atualize página (F5)
+
+
+═══════════════════════════════════════════════════════════════════════════
+ 📁 ARQUIVOS IMPORTANTES
+═══════════════════════════════════════════════════════════════════════════
+
+ BUILD.bat              → Compila imagens Docker
+ START.bat              → Inicia sistema
+ STOP.bat               → Para sistema
+ .env                   → Suas configurações (criar)
+ .env.example           → Exemplo de configuração
+
+ README.md              → Documentação completa
+ COMO_USAR.md           → Guia detalhado
+ TROUBLESHOOTING.md     → Solução de problemas
+
+
+═══════════════════════════════════════════════════════════════════════════
+ 🎓 COMANDOS ÚTEIS
+═══════════════════════════════════════════════════════════════════════════
+
+ Ver logs:
+ docker-compose logs -f
+
+ Ver status:
+ docker-compose ps
+
+ Parar tudo:
+ docker-compose down
+ 
+ Ou simplesmente:
+ STOP.bat
+
+ Reconstruir:
+ BUILD.bat
+
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                                                                           ║
+║  🚀 COMECE AGORA:                                                         ║
+║                                                                           ║
+║  1. Clique em BUILD.bat (aguarde 2-5 min)                                ║
+║  2. Clique em START.bat (aguarde 30 seg)                                 ║
+║  3. Crie fábrica e copie API Key                                         ║
+║  4. Crie arquivo .env com a chave                                        ║
+║  5. Clique em START.bat novamente                                        ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+
+                    Desenvolvido com ❤️ para a Indústria 4.0
+                              Copyright © 2026 HUB System

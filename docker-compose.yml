@@ -1,0 +1,39 @@
+services:
+  nxd-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.nxd
+    container_name: nxd-server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - PORT=8080
+    networks:
+      - nxd-network
+    restart: unless-stopped
+
+  dx-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    container_name: nxd-simulator
+    depends_on:
+      - nxd-server
+    environment:
+      - NXD_ENDPOINT=http://nxd-server:8080/api/ingest
+      - HUB_ENDPOINT=http://nxd-server:8080/api/ingest
+      - API_KEY=${API_KEY:-}
+    networks:
+      - nxd-network
+    restart: unless-stopped
+
+networks:
+  nxd-network:
+    driver: bridge
+
+volumes:
+  data:
+  logs:
