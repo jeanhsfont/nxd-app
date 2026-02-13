@@ -5,48 +5,247 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NXD - Nexus Data Exchange</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🏭 NXD</h1>
-            <p class="subtitle">Nexus Data Exchange - Inteligência Industrial em Tempo Real</p>
-        </header>
-
-        <div id="setup-section" class="section">
-            <h2>🔧 Configuração Inicial</h2>
-            <div class="card">
-                <h3>Criar Nova Fábrica</h3>
-                <input type="text" id="factory-name" placeholder="Nome da Fábrica" />
-                <button onclick="createFactory()">Criar Fábrica</button>
-                <div id="api-key-result"></div>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h1>🏭 NXD</h1>
+                <p>Nexus Data Exchange</p>
             </div>
+            
+            <ul class="nav-menu">
+                <li class="nav-item active" data-page="live">
+                    <span class="nav-icon">📡</span>
+                    <span class="nav-text">Live View</span>
+                </li>
+                <li class="nav-item" data-page="financeiro">
+                    <span class="nav-icon">💰</span>
+                    <span class="nav-text">Financeiro</span>
+                </li>
+                <li class="nav-item" data-page="comparativo">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-text">Comparativos</span>
+                </li>
+                <li class="nav-item" data-page="config">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-text">Configurações</span>
+                </li>
+            </ul>
 
-            <div class="card">
-                <h3>Acessar Dashboard</h3>
-                <input type="text" id="api-key-input" placeholder="Cole sua API Key aqui" />
-                <button onclick="loadDashboard()">Carregar Dashboard</button>
+            <div class="sidebar-footer">
+                <div class="factory-badge" id="factory-badge">
+                    <span class="factory-icon">🏭</span>
+                    <span class="factory-name" id="sidebar-factory-name">-</span>
+                </div>
+                <button class="btn-logout" onclick="logout()">Sair</button>
             </div>
-        </div>
+        </nav>
 
-        <div id="dashboard-section" class="section" style="display: none;">
-            <div class="dashboard-header">
-                <h2>📊 Dashboard</h2>
-                <div class="factory-info">
-                    <span id="factory-name-display"></span>
-                    <button onclick="logout()">Sair</button>
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Login Section -->
+            <div id="login-section" class="page active">
+                <div class="login-container">
+                    <div class="login-header">
+                        <h1>🏭 NXD</h1>
+                        <p>Nexus Data Exchange - Inteligência Industrial em Tempo Real</p>
+                    </div>
+                    
+                    <div class="login-card">
+                        <h2>🔧 Configuração Inicial</h2>
+                        
+                        <div class="form-group">
+                            <label>Criar Nova Fábrica</label>
+                            <input type="text" id="factory-name" placeholder="Nome da Fábrica" />
+                            <button class="btn-primary" onclick="createFactory()">Criar Fábrica</button>
+                        </div>
+                        
+                        <div id="api-key-result" class="api-result"></div>
+                        
+                        <hr>
+                        
+                        <div class="form-group">
+                            <label>Acessar Dashboard</label>
+                            <input type="text" id="api-key-input" placeholder="Cole sua API Key aqui" />
+                            <button class="btn-primary" onclick="loadDashboard()">Entrar</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div id="machines-grid" class="machines-grid">
-                <!-- Cards de máquinas serão inseridos aqui -->
+            <!-- Live View Page -->
+            <div id="live-page" class="page">
+                <div class="page-header">
+                    <h2>📡 Live View</h2>
+                    <p>Monitoramento em tempo real das máquinas</p>
+                </div>
+                
+                <div id="machines-grid" class="machines-grid">
+                    <!-- Cards de máquinas -->
+                </div>
+                
+                <div id="no-machines" class="empty-state">
+                    <p>⏳ Aguardando dados do DX...</p>
+                    <p>Configure o módulo DX com a API Key e os dados aparecerão aqui.</p>
+                </div>
             </div>
 
-            <div id="no-machines" style="display: none;" class="card">
-                <p>⏳ Aguardando dados do DX...</p>
-                <p>Configure o módulo DX com a API Key e os dados aparecerão automaticamente aqui.</p>
+            <!-- Financeiro Page -->
+            <div id="financeiro-page" class="page">
+                <div class="page-header">
+                    <h2>💰 Painel Financeiro</h2>
+                    <p>Impacto financeiro em tempo real</p>
+                </div>
+                
+                <div class="widgets-grid">
+                    <!-- Widget Lucro Cessante -->
+                    <div class="widget widget-large lucro-cessante">
+                        <div class="widget-header">
+                            <h3>💸 Lucro Cessante</h3>
+                            <span class="widget-subtitle">Prejuízo por máquinas paradas</span>
+                        </div>
+                        <div class="widget-body">
+                            <div class="big-number negative" id="lucro-cessante-total">
+                                R$ 0,00
+                            </div>
+                            <div class="lucro-details" id="lucro-details">
+                                <!-- Detalhes por máquina -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Widget Produção Total -->
+                    <div class="widget producao-total">
+                        <div class="widget-header">
+                            <h3>📦 Produção Total</h3>
+                            <span class="widget-subtitle">Peças produzidas hoje</span>
+                        </div>
+                        <div class="widget-body">
+                            <div class="big-number positive" id="total-pecas">0</div>
+                            <span class="unit">peças</span>
+                        </div>
+                    </div>
+
+                    <!-- Widget Energia -->
+                    <div class="widget energia-total">
+                        <div class="widget-header">
+                            <h3>⚡ Consumo Energia</h3>
+                            <span class="widget-subtitle">Total do dia</span>
+                        </div>
+                        <div class="widget-body">
+                            <div class="big-number neutral" id="total-energia">0</div>
+                            <span class="unit">kWh</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabela de Status Financeiro -->
+                <div class="table-container">
+                    <h3>📋 Status Financeiro por Máquina</h3>
+                    <table class="data-table" id="financial-table">
+                        <thead>
+                            <tr>
+                                <th>Máquina</th>
+                                <th>Status</th>
+                                <th>Custo/Hora</th>
+                                <th>Tempo Parado</th>
+                                <th>Prejuízo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="financial-table-body">
+                        </tbody>
+                    </table>
+                </div>
             </div>
-        </div>
+
+            <!-- Comparativo Page -->
+            <div id="comparativo-page" class="page">
+                <div class="page-header">
+                    <h2>📊 Análise Comparativa</h2>
+                    <p>Compare o desempenho das máquinas</p>
+                </div>
+                
+                <div class="widgets-grid">
+                    <!-- Widget Eficiência -->
+                    <div class="widget widget-large">
+                        <div class="widget-header">
+                            <h3>🏆 Radar de Eficiência</h3>
+                            <span class="widget-subtitle">Peças produzidas por kWh consumido</span>
+                        </div>
+                        <div class="widget-body">
+                            <div class="chart-container">
+                                <canvas id="efficiency-chart"></canvas>
+                            </div>
+                            <div class="efficiency-winner" id="efficiency-winner">
+                                <!-- Máquina mais eficiente -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Widget Saúde -->
+                    <div class="widget widget-large">
+                        <div class="widget-header">
+                            <h3>🔮 Previsão de Parada</h3>
+                            <span class="widget-subtitle">Indicador de saúde das máquinas</span>
+                        </div>
+                        <div class="widget-body">
+                            <div class="health-indicators" id="health-indicators">
+                                <!-- Indicadores de saúde -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Gráfico de Produção -->
+                <div class="chart-full-width">
+                    <h3>📈 Produção Comparativa</h3>
+                    <div class="chart-container-large">
+                        <canvas id="production-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Config Page -->
+            <div id="config-page" class="page">
+                <div class="page-header">
+                    <h2>⚙️ Configurações</h2>
+                    <p>Configure sua fábrica e integração</p>
+                </div>
+                
+                <div class="config-cards">
+                    <div class="config-card">
+                        <h3>🔑 API Key</h3>
+                        <p>Use esta chave para configurar seu módulo DX:</p>
+                        <div class="api-key-display" id="config-api-key">-</div>
+                        <button class="btn-secondary" onclick="copyApiKey()">📋 Copiar</button>
+                    </div>
+
+                    <div class="config-card">
+                        <h3>📡 Endpoint de Ingestão</h3>
+                        <p>Configure o DX para enviar dados para:</p>
+                        <div class="api-key-display" id="config-endpoint">-</div>
+                        <button class="btn-secondary" onclick="copyEndpoint()">📋 Copiar</button>
+                    </div>
+
+                    <div class="config-card">
+                        <h3>🏭 Informações da Fábrica</h3>
+                        <div class="info-grid">
+                            <div class="info-item">
+                                <span class="info-label">Nome:</span>
+                                <span class="info-value" id="config-factory-name">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Máquinas conectadas:</span>
+                                <span class="info-value" id="config-machine-count">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
 
     <script src="app.js"></script>

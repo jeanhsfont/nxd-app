@@ -212,6 +212,143 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AnalyticsHandler retorna métricas financeiras e de eficiência
+func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		http.Error(w, "API Key não fornecida", http.StatusBadRequest)
+		return
+	}
+
+	// Busca fábrica
+	factory, err := data.GetFactoryByAPIKey(apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		return
+	}
+
+	// Busca máquinas
+	machines, err := data.GetMachinesByFactory(factory.ID)
+	if err != nil {
+		http.Error(w, "Erro ao buscar máquinas", http.StatusInternalServerError)
+		return
+	}
+
+	type MachineAnalytics struct {
+		ID              int64   `json:"id"`
+		Name            string  `json:"name"`
+		Brand           string  `json:"brand"`
+		Status          bool    `json:"status"`
+		TotalPecas      int     `json:"total_pecas"`
+		ConsumoEnergia  float64 `json:"consumo_energia"`
+		Eficiencia      float64 `json:"eficiencia"` // peças/kWh
+		HealthScore     float64 `json:"health_score"`
+		CustoHoraParada float64 `json:"custo_hora_parada"`
+		TempoParado     float64 `json:"tempo_parado_min"`
+		LucroCessante   float64 `json:"lucro_cessante"`
+		Temperatura     float64 `json:"temperatura"`
+		UltimoUpdate    string  `json:"ultimo_update"`
+	}
+
+	var analytics []MachineAnalytics
+	totalLucroCessante := 0.0
+	totalPecas := 0
+
+	for _, machine := range machines {
+		values, _ := data.GetLatestDataPoints(machine.ID)
+		
+		// Extrai valores das tags
+		status := parseBool(values["Status_Producao"])
+		totalPecasM := parseInt(values["Total_Pecas"])
+		consumoEnergia := parseFloat(values["Consumo_Energia_kWh"])
+		healthScore := parseFloat(values["Health_Score"])
+		custoHora := parseFloat(values["Custo_Hora_Parada"])
+		temperatura := parseFloat(values["Temperatura_Molde"])
+
+		// Calcula eficiência
+		eficiencia := 0.0
+		if consumoEnergia > 0 {
+			eficiencia = float64(totalPecasM) / consumoEnergia
+		}
+
+		// Calcula lucro cessante (tempo parado estimado baseado no status)
+		tempoParado := 0.0
+		lucroCessante := 0.0
+		if !status && custoHora > 0 {
+			// Se está parado agora, estima 5 minutos de parada
+			tempoParado = 5.0
+			lucroCessante = (tempoParado / 60.0) * custoHora
+		}
+
+		// Acumula totais
+		totalLucroCessante += lucroCessante
+		totalPecas += totalPecasM
+
+		analytics = append(analytics, MachineAnalytics{
+			ID:              machine.ID,
+			Name:            machine.Name,
+			Brand:           machine.Brand,
+			Status:          status,
+			TotalPecas:      totalPecasM,
+			ConsumoEnergia:  consumoEnergia,
+			Eficiencia:      eficiencia,
+			HealthScore:     healthScore,
+			CustoHoraParada: custoHora,
+			TempoParado:     tempoParado,
+			LucroCessante:   lucroCessante,
+			Temperatura:     temperatura,
+			UltimoUpdate:    machine.LastSeen.Format("15:04:05"),
+		})
+	}
+
+	// Calcula comparativo de eficiência
+	var maisEficiente string
+	var menorEficiencia float64 = 999999
+	var maiorEficiencia float64 = 0
+	for _, a := range analytics {
+		if a.Eficiencia > maiorEficiencia {
+			maiorEficiencia = a.Eficiencia
+			maisEficiente = a.Name
+		}
+		if a.Eficiencia < menorEficiencia && a.Eficiencia > 0 {
+			menorEficiencia = a.Eficiencia
+		}
+	}
+
+	ganhoEficiencia := 0.0
+	if menorEficiencia > 0 && menorEficiencia < 999999 {
+		ganhoEficiencia = ((maiorEficiencia / menorEficiencia) - 1) * 100
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory":            factory.Name,
+		"machines":           analytics,
+		"total_pecas":        totalPecas,
+		"total_lucro_cessante": totalLucroCessante,
+		"mais_eficiente":     maisEficiente,
+		"ganho_eficiencia":   ganhoEficiencia,
+		"timestamp":          time.Now().Format(time.RFC3339),
+	})
+}
+
+// Funções auxiliares de parsing
+func parseBool(s string) bool {
+	return s == "true" || s == "1"
+}
+
+func parseInt(s string) int {
+	var v int
+	fmt.Sscanf(s, "%d", &v)
+	return v
+}
+
+func parseFloat(s string) float64 {
+	var v float64
+	fmt.Sscanf(s, "%f", &v)
+	return v
+}
+
 // detectType detecta o tipo de um valor
 func detectType(value interface{}) string {
 	switch value.(type) {
