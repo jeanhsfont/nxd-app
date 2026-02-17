@@ -14,6 +14,7 @@ env:
   GCP_SERVICE_ACCOUNT: 925156909645-compute@developer.gserviceaccount.com
   WIF_POOL: nxd-github-pool
   WIF_PROVIDER: nxd-github-provider
+  WIF_PROVIDER_RESOURCE: projects/925156909645/locations/global/workloadIdentityPools/nxd-github-pool/providers/nxd-github-provider
 
 jobs:
   build-and-deploy:
@@ -29,11 +30,12 @@ jobs:
 
       - name: Google Auth via WIF
         id: auth
-        uses: 'google-github-actions/auth@v1'
+        uses: 'google-github-actions/auth@v2'
         with:
           project_id: '${{ env.PROJECT_ID }}'
-          workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL }}/providers/${{ env.WIF_PROVIDER }}'
+          workload_identity_provider: '${{ env.WIF_PROVIDER_RESOURCE }}'
           service_account: '${{ env.GCP_SERVICE_ACCOUNT }}'
+          token_format: access_token
 
       - name: Set up Cloud SDK
         uses: 'google-github-actions/setup-gcloud@v1'
