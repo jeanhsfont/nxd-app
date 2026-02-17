@@ -30,6 +30,7 @@ jobs:
         id: auth
         uses: 'google-github-actions/auth@v1'
         with:
+          project_id: '${{ env.PROJECT_ID }}'
           workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL }}/providers/${{ env.WIF_PROVIDER }}'
           service_account: '${{ env.GCP_SERVICE_ACCOUNT }}'
 
