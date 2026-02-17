@@ -7,6 +7,7 @@ on:
 
 env:
   PROJECT_ID: slideflow-prod
+  GCP_PROJECT_NUMBER: 925156909645
   GAR_LOCATION: us-central1
   SERVICE: nxd-core
   REGION: us-central1
@@ -31,7 +32,7 @@ jobs:
         uses: 'google-github-actions/auth@v1'
         with:
           project_id: '${{ env.PROJECT_ID }}'
-          workload_identity_provider: 'projects/${{ secrets.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL }}/providers/${{ env.WIF_PROVIDER }}'
+          workload_identity_provider: 'projects/${{ env.GCP_PROJECT_NUMBER }}/locations/global/workloadIdentityPools/${{ env.WIF_POOL }}/providers/${{ env.WIF_PROVIDER }}'
           service_account: '${{ env.GCP_SERVICE_ACCOUNT }}'
 
       - name: Set up Cloud SDK
