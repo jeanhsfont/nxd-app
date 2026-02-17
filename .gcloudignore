@@ -1,0 +1,15 @@
+# Deploy só NXD — não envia simuladores, docs nem artefatos
+.git
+.gitignore
+.playwright-mcp
+logs
+*.log
+dx-simulator
+modbus-simulator
+simulator
+NXD_OPS_KIT
+docs
+*.md
+Dockerfile.simulator
+.cursor
+node_modules

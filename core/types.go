@@ -2,13 +2,32 @@ package core
 
 import "time"
 
+// User representa um usuário logado (Google)
+type User struct {
+	ID               int       `json:"id"`
+	Email            string    `json:"email"`
+	Name             string    `json:"name"`
+	GoogleUID        string    `json:"-"` // não expor
+	TermsAcceptedAt  *time.Time `json:"terms_accepted_at"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 // Factory representa uma unidade/fábrica cadastrada
 type Factory struct {
 	ID        int       `json:"id"`
+	UserID    *int      `json:"user_id,omitempty"` // dono da fábrica (1:1 por enquanto)
 	Name      string    `json:"name"`
-	APIKey    string    `json:"api_key"`
+	APIKey    string    `json:"api_key,omitempty"` // omitir em listagens; mostrar só na criação/regeneração
 	CreatedAt time.Time `json:"created_at"`
 	IsActive  bool      `json:"is_active"`
+}
+
+// Sector representa um setor/baia criado pelo usuário
+type Sector struct {
+	ID         int       `json:"id"`
+	FactoryID  int       `json:"factory_id"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 // Machine representa uma máquina conectada
@@ -19,9 +38,13 @@ type Machine struct {
 	Name       string    `json:"name"`
 	Brand      string    `json:"brand"`      // Siemens, Delta, Mitsubishi
 	Protocol   string    `json:"protocol"`   // S7, Modbus, etc
-	LastSeen   time.Time `json:"last_seen"`
-	Status     string    `json:"status"`     // online, offline, error
-	CreatedAt  time.Time `json:"created_at"`
+	LastSeen    time.Time `json:"last_seen"`
+	Status      string    `json:"status"`       // online, offline, error
+	CreatedAt   time.Time `json:"created_at"`
+	DisplayName string    `json:"display_name"` // nome que o gestor dá
+	Notes       string    `json:"notes"`
+	SectorID    *int      `json:"sector_id,omitempty"`
+	SectorName  string    `json:"sector_name,omitempty"`
 }
 
 // Tag representa um ponto de dados (auto-discovery)

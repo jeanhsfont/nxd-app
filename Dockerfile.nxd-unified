@@ -1,0 +1,38 @@
+# Stage 1: Build Frontend (React)
+FROM node:20-alpine AS builder-frontend
+WORKDIR /app/frontend
+COPY web-app/package*.json ./
+RUN npm install
+COPY web-app/ ./
+RUN npm run build
+
+# Stage 2: Build Backend (Go)
+FROM golang:1.24-bullseye AS builder-backend
+WORKDIR /app/backend
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev sqlite3 libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+RUN CGO_ENABLED=1 GOOS=linux go build -o nxd-server main.go
+
+# Stage 3: Runtime
+FROM debian:bullseye-slim
+WORKDIR /root/
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 && rm -rf /var/lib/apt/lists/*
+
+# Copia binário do Backend
+COPY --from=builder-backend /app/backend/nxd-server .
+
+# Copia arquivos estáticos do Frontend (Buildado) para ./dist
+# O main.go espera encontrar em ./dist
+COPY --from=builder-frontend /app/frontend/dist ./dist
+
+# Copia pasta docs (opcional, mas útil para referência interna)
+# COPY --from=builder-backend /app/backend/docs ./docs
+
+# Expose porta 8080 (Cloud Run padrão)
+EXPOSE 8080
+
+# Comando de execução
+CMD ["./nxd-server"]

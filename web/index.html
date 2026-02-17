@@ -21,6 +21,14 @@
                     <span class="nav-icon">📡</span>
                     <span class="nav-text">Live View</span>
                 </li>
+                <li class="nav-item" data-page="ativos">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-text">Ativos / Baias</span>
+                </li>
+                <li class="nav-item" data-page="ia">
+                    <span class="nav-icon">🤖</span>
+                    <span class="nav-text">Central de IA</span>
+                </li>
                 <li class="nav-item" data-page="financeiro">
                     <span class="nav-icon">💰</span>
                     <span class="nav-text">Financeiro</span>
@@ -28,6 +36,10 @@
                 <li class="nav-item" data-page="comparativo">
                     <span class="nav-icon">📊</span>
                     <span class="nav-text">Comparativos</span>
+                </li>
+                <li class="nav-item" data-page="nxd-ativos">
+                    <span class="nav-icon">📦</span>
+                    <span class="nav-text">NXD Ativos</span>
                 </li>
                 <li class="nav-item" data-page="config">
                     <span class="nav-icon">⚙️</span>
@@ -54,35 +66,67 @@
                         <p>Nexus Data Exchange - Inteligência Industrial em Tempo Real</p>
                     </div>
                     
-                    <div class="login-card">
-                        <h2>🔧 Configuração Inicial</h2>
-                        
+                    <!-- Não logado: Entrar com Google -->
+                    <div id="login-google-card" class="login-card">
+                        <h2>Entrar</h2>
+                        <p>Use sua conta Google para acessar o NXD.</p>
+                        <a href="/api/auth/google/login" class="btn-primary btn-google">Entrar com Google</a>
+                    </div>
+                    
+                    <!-- Logado sem fábrica: Criar fábrica -->
+                    <div id="login-create-factory-card" class="login-card" style="display:none">
+                        <h2>Criar sua fábrica</h2>
+                        <p>Você ainda não tem uma fábrica cadastrada. Crie uma para começar.</p>
                         <div class="form-group">
-                            <label>Criar Nova Fábrica</label>
-                            <input type="text" id="factory-name" placeholder="Nome da Fábrica" />
-                            <button class="btn-primary" onclick="createFactory()">Criar Fábrica</button>
+                            <label>Nome da fábrica</label>
+                            <input type="text" id="factory-name" placeholder="Ex: Plásticos ABC" />
+                            <button class="btn-primary" onclick="createFactoryAuth()">Criar fábrica</button>
                         </div>
-                        
                         <div id="api-key-result" class="api-result"></div>
-                        
-                        <hr>
-                        
-                        <div class="form-group">
-                            <label>Acessar Dashboard</label>
-                            <input type="text" id="api-key-input" placeholder="Cole sua API Key aqui" />
-                            <button class="btn-primary" onclick="loadDashboard()">Entrar</button>
-                        </div>
+                    </div>
+                    
+                    <!-- Acesso legado por API Key (opcional) -->
+                    <div class="login-card" style="margin-top:1rem">
+                        <h3>Acessar com API Key</h3>
+                        <input type="text" id="api-key-input" placeholder="Cole sua API Key" />
+                        <button class="btn-secondary" onclick="loadDashboard()">Entrar</button>
                     </div>
                 </div>
             </div>
 
-            <!-- Live View Page -->
+            <!-- Live View Page = Dashboard de Alívio + detalhe -->
             <div id="live-page" class="page">
                 <div class="page-header">
-                    <h2>📡 Live View</h2>
-                    <p>Monitoramento em tempo real das máquinas</p>
+                    <h2>📡 Visão geral</h2>
+                    <p>Pulso do negócio em tempo real</p>
                 </div>
                 
+                <!-- Dashboard de Alívio: cards de resumo -->
+                <div id="alivio-cards" class="alivio-cards">
+                    <div class="alivio-card operando">
+                        <span class="alivio-number" id="card-online">0</span>
+                        <span class="alivio-label">Operando</span>
+                    </div>
+                    <div class="alivio-card paradas">
+                        <span class="alivio-number" id="card-offline">0</span>
+                        <span class="alivio-label">Paradas</span>
+                    </div>
+                    <div class="alivio-card criticos">
+                        <span class="alivio-number" id="card-critical">0</span>
+                        <span class="alivio-label">Alertas críticos</span>
+                    </div>
+                    <div class="alivio-card producao">
+                        <span class="alivio-number" id="card-pecas">0</span>
+                        <span class="alivio-label">Produção (hoje)</span>
+                    </div>
+                    <div class="alivio-card lucro">
+                        <span class="alivio-number" id="card-lucro">R$ 0</span>
+                        <span class="alivio-label">Lucro cessante</span>
+                    </div>
+                </div>
+                <p id="alivio-message" class="alivio-message"></p>
+                
+                <h3 class="section-title">Máquinas</h3>
                 <div id="machines-grid" class="machines-grid">
                     <!-- Cards de máquinas -->
                 </div>
@@ -91,6 +135,112 @@
                     <p>⏳ Aguardando dados do DX...</p>
                     <p>Configure o módulo DX com a API Key e os dados aparecerão aqui.</p>
                 </div>
+            </div>
+
+            <!-- Ativos / Baias Page -->
+            <div id="ativos-page" class="page">
+                <div class="page-header">
+                    <h2>📋 Gestão de Ativos e Setores</h2>
+                    <p>Organize máquinas em setores (baias), renomeie e adicione anotações</p>
+                </div>
+                <div class="config-cards">
+                    <div class="config-card">
+                        <h3>Novo setor</h3>
+                        <input type="text" id="sector-name" placeholder="Ex: Linha de Montagem A" />
+                        <button class="btn-primary" onclick="createSector()">Criar setor</button>
+                    </div>
+                </div>
+                <h3 class="section-title">Setores</h3>
+                <ul id="sectors-list" class="sectors-list"></ul>
+                <h3 class="section-title">Máquinas</h3>
+                <div id="ativos-machines" class="ativos-table-wrap">
+                    <p class="empty-state">Carregue o dashboard primeiro. As máquinas aparecerão aqui para você atribuir a setores e renomear.</p>
+                </div>
+            </div>
+
+            <!-- Central de IA Page -->
+            <div id="ia-page" class="page">
+                <div class="page-header">
+                    <h2>🤖 Central de IA</h2>
+                    <p>Relatório mastigado com filtros: setor, período, turno e nicho (Financeiro, Produção, Manutenção)</p>
+                </div>
+                <div class="config-cards report-ia-filters">
+                    <div class="config-card">
+                        <h3>Filtros</h3>
+                        <div class="form-row">
+                            <label>Setor</label>
+                            <select id="ia-sector"><option value="">Todos</option></select>
+                        </div>
+                        <div class="form-row">
+                            <label>Período</label>
+                            <select id="ia-period">
+                                <option value="hoje">Hoje</option>
+                                <option value="ultima_semana">Última semana</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Turno</label>
+                            <select id="ia-shift">
+                                <option value="">Todos</option>
+                                <option value="manha">Manhã</option>
+                                <option value="tarde">Tarde</option>
+                                <option value="noite">Noite</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Detalhamento</label>
+                            <select id="ia-detail">
+                                <option value="baixo">Baixo</option>
+                                <option value="medio" selected>Médio</option>
+                                <option value="detalhado">Detalhado</option>
+                            </select>
+                        </div>
+                        <div class="form-row">
+                            <label>Nichos do relatório</label>
+                            <div class="checkbox-group">
+                                <label><input type="checkbox" id="ia-nicho-financeiro" checked /> Financeiro</label>
+                                <label><input type="checkbox" id="ia-nicho-producao" checked /> Produção</label>
+                                <label><input type="checkbox" id="ia-nicho-manutencao" checked /> Manutenção</label>
+                            </div>
+                        </div>
+                        <button class="btn-primary" onclick="generateReportIA()">Gerar relatório</button>
+                    </div>
+                </div>
+                <div id="ia-result" class="report-ia-result" style="display:none">
+                    <h3 class="section-title">Relatório</h3>
+                    <div id="ia-report-text" class="report-text"></div>
+                    <h3 class="section-title">Rastreabilidade (Caminho da Verdade)</h3>
+                    <p class="rastreabilidade-intro">Cada dado tem fonte, origem, processamento e data/hora.</p>
+                    <div id="ia-rastreabilidade" class="rastreabilidade-list"></div>
+                </div>
+            </div>
+
+            <!-- NXD Gestão de Ativos (v2) -->
+            <div id="nxd-ativos-page" class="page">
+                <div class="page-header">
+                    <h2>📦 NXD Gestão de Ativos</h2>
+                    <p>Tags descobertas e setores (baias). Selecione a fábrica e organize os ativos.</p>
+                </div>
+                <div class="nxd-ativos-toolbar">
+                    <label>Fábrica NXD</label>
+                    <select id="nxd-factory-select"><option value="">-- Selecione --</option></select>
+                    <button class="btn-secondary" id="nxd-create-factory-btn" style="display:none">Criar fábrica NXD</button>
+                </div>
+                <div id="nxd-ativos-content" class="nxd-ativos-layout" style="display:none">
+                    <div class="nxd-col-left">
+                        <h3 class="section-title">Origem (Tags descobertas)</h3>
+                        <input type="text" id="nxd-search-ungrouped" placeholder="Buscar..." />
+                        <ul id="nxd-ungrouped-list" class="nxd-asset-list"></ul>
+                    </div>
+                    <div class="nxd-col-right">
+                        <div class="nxd-setores-header">
+                            <h3 class="section-title">Setores</h3>
+                            <button class="btn-primary" id="nxd-create-group-btn">+ Criar Setor</button>
+                        </div>
+                        <div id="nxd-groups-cards" class="nxd-groups-cards"></div>
+                    </div>
+                </div>
+                <div id="nxd-ativos-empty" class="empty-state">Selecione uma fábrica NXD ou crie uma para começar.</div>
             </div>
 
             <!-- Financeiro Page -->
@@ -218,9 +368,10 @@
                 <div class="config-cards">
                     <div class="config-card">
                         <h3>🔑 API Key</h3>
-                        <p>Use esta chave para configurar seu módulo DX:</p>
+                        <p>Use esta chave no nanoDX. Mostrada só na criação ou ao regenerar.</p>
                         <div class="api-key-display" id="config-api-key">-</div>
                         <button class="btn-secondary" onclick="copyApiKey()">📋 Copiar</button>
+                        <button id="btn-regenerate-api" class="btn-secondary" onclick="regenerateApiKey()" style="margin-left:8px; display:none">Regenerar API Key</button>
                     </div>
 
                     <div class="config-card">

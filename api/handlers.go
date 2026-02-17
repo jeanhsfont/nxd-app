@@ -8,6 +8,7 @@ import (
 	"hubsystem/services"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -155,18 +156,208 @@ func CreateFactoryHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetDashboardHandler retorna dados do dashboard
-func GetDashboardHandler(w http.ResponseWriter, r *http.Request) {
-	apiKey := r.URL.Query().Get("api_key")
-	if apiKey == "" {
-		http.Error(w, "API Key não fornecida", http.StatusBadRequest)
+// CreateFactoryAuthHandler cria fábrica para o usuário logado; retorna api_key uma vez
+func CreateFactoryAuthHandler(w http.ResponseWriter, r *http.Request) {
+	user := UserFromRequest(r)
+	if user == nil {
+		http.Error(w, "faça login", http.StatusUnauthorized)
 		return
 	}
+	existing, _ := data.GetFactoryByUserID(user.ID)
+	if existing != nil {
+		http.Error(w, "você já possui uma fábrica cadastrada", http.StatusConflict)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		http.Error(w, "Nome da fábrica é obrigatório", http.StatusBadRequest)
+		return
+	}
+	apiKey, err := core.GenerateAPIKey()
+	if err != nil {
+		http.Error(w, "Erro ao gerar API Key", http.StatusInternalServerError)
+		return
+	}
+	factoryID, err := data.CreateFactoryForUser(req.Name, apiKey, user.ID)
+	if err != nil {
+		http.Error(w, "Erro ao criar fábrica", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("🏭 Fábrica criada para user %d: %s (ID: %d)", user.ID, req.Name, factoryID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id": factoryID, "name": req.Name, "api_key": apiKey,
+	})
+}
 
-	// Busca fábrica
-	factory, err := data.GetFactoryByAPIKey(apiKey)
+// RegenerateAPIKeyHandler gera nova API Key para a fábrica do usuário
+func RegenerateAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
+	user := UserFromRequest(r)
+	if user == nil {
+		http.Error(w, "faça login", http.StatusUnauthorized)
+		return
+	}
+	factory, err := data.GetFactoryByUserID(user.ID)
 	if err != nil || factory == nil {
-		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		http.Error(w, "fábrica não encontrada", http.StatusNotFound)
+		return
+	}
+	newKey, err := data.RegenerateAPIKey(factory.ID)
+	if err != nil {
+		http.Error(w, "Erro ao regenerar API Key", http.StatusInternalServerError)
+		return
+	}
+	log.Printf("🔑 API Key regenerada para fábrica %s (user %d)", factory.Name, user.ID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"api_key": newKey})
+}
+
+// GetSectorsHandler lista setores (baias) da fábrica
+func GetSectorsHandler(w http.ResponseWriter, r *http.Request) {
+	factory, err := getFactoryFromRequest(r)
+	if err != nil || factory == nil {
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
+		return
+	}
+	list, err := data.GetSectorsByFactory(factory.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"sectors": list})
+}
+
+// CreateSectorHandler cria um setor (baia)
+func CreateSectorHandler(w http.ResponseWriter, r *http.Request) {
+	factory, err := getFactoryFromRequest(r)
+	if err != nil || factory == nil {
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		http.Error(w, "Nome do setor é obrigatório", http.StatusBadRequest)
+		return
+	}
+	id, err := data.CreateSector(factory.ID, strings.TrimSpace(req.Name))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "name": req.Name})
+}
+
+// UpdateMachineAssetHandler atualiza display_name, notes e setor da máquina
+func UpdateMachineAssetHandler(w http.ResponseWriter, r *http.Request) {
+	factory, err := getFactoryFromRequest(r)
+	if err != nil || factory == nil {
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
+		return
+	}
+	var req struct {
+		MachineID   int    `json:"machine_id"`
+		DisplayName string `json:"display_name"`
+		Notes       string `json:"notes"`
+		SectorID    int    `json:"sector_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Payload inválido", http.StatusBadRequest)
+		return
+	}
+	if req.MachineID <= 0 {
+		http.Error(w, "machine_id obrigatório", http.StatusBadRequest)
+		return
+	}
+	machines, _ := data.GetMachinesByFactory(factory.ID)
+	var found bool
+	for _, m := range machines {
+		if m.ID == req.MachineID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "Máquina não encontrada", http.StatusNotFound)
+		return
+	}
+	if req.DisplayName != "" {
+		_ = data.UpdateMachineDisplayName(req.MachineID, strings.TrimSpace(req.DisplayName))
+	}
+	_ = data.UpdateMachineNotes(req.MachineID, strings.TrimSpace(req.Notes))
+	_ = data.SetMachineSector(req.MachineID, req.SectorID)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+// DashboardSummaryHandler retorna resumo para o "Dashboard de Alívio" (cards: ON/OFF, alertas, produção)
+func DashboardSummaryHandler(w http.ResponseWriter, r *http.Request) {
+	factory, err := getFactoryFromRequest(r)
+	if err != nil || factory == nil {
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
+		return
+	}
+	statuses, err := services.GetMachineHealthStatus(factory.ID)
+	if err != nil {
+		http.Error(w, "Erro ao buscar status", http.StatusInternalServerError)
+		return
+	}
+	online, offline, critical := 0, 0, 0
+	for _, s := range statuses {
+		switch s.Status {
+		case "online": online++
+		case "offline": offline++
+		case "critical": critical++
+		}
+	}
+	machines, _ := data.GetMachinesByFactory(factory.ID)
+	totalPecas := 0
+	totalLucroCessante := 0.0
+	for _, machine := range machines {
+		values, _ := data.GetLatestDataPoints(machine.ID)
+		totalPecas += parseInt(values["Total_Pecas"])
+		status := parseBool(values["Status_Producao"])
+		custoHora := parseFloat(values["Custo_Hora_Parada"])
+		if !status && custoHora > 0 {
+			totalLucroCessante += (5.0 / 60.0) * custoHora
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory":               factory.Name,
+		"online":                online,
+		"offline":               offline,
+		"critical":              critical,
+		"total_machines":         len(statuses),
+		"total_pecas":           totalPecas,
+		"lucro_cessante":        totalLucroCessante,
+		"message":               getOverallHealthMessage(online, offline, critical),
+		"timestamp":             time.Now().Format(time.RFC3339),
+	})
+}
+
+// getFactoryFromRequest retorna a fábrica via api_key (query) ou via usuário logado
+func getFactoryFromRequest(r *http.Request) (*core.Factory, error) {
+	if apiKey := r.URL.Query().Get("api_key"); apiKey != "" {
+		return data.GetFactoryByAPIKey(apiKey)
+	}
+	user := UserFromRequest(r)
+	if user == nil {
+		return nil, nil
+	}
+	return data.GetFactoryByUserID(user.ID)
+}
+
+// GetDashboardHandler retorna dados do dashboard (api_key na query ou sessão)
+func GetDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	factory, err := getFactoryFromRequest(r)
+	if err != nil || factory == nil {
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
 		return
 	}
 
@@ -212,18 +403,43 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AnalyticsHandler retorna métricas financeiras e de eficiência
-func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
-	apiKey := r.URL.Query().Get("api_key")
-	if apiKey == "" {
-		http.Error(w, "API Key não fornecida", http.StatusBadRequest)
-		return
+// SystemParamsHandler retorna parâmetros do sistema (ex.: se IA está operando 100%).
+// GET /api/system
+func SystemParamsHandler(w http.ResponseWriter, r *http.Request) {
+	iaProvider := os.Getenv("NXD_IA_PROVIDER")   // "vertex" | "gemini" | ""
+	geminiKey := os.Getenv("GEMINI_API_KEY")     // legado / API Gemini direta
+	vertexProject := os.Getenv("VERTEX_AI_PROJECT")
+	iaConfigurado := iaProvider != "" || geminiKey != "" || vertexProject != ""
+	// NXD relatórios usam Vertex quando NXD_IA_PROVIDER=vertex e VERTEX_AI_PROJECT definido.
+	iaOperando100 := iaProvider == "vertex" && vertexProject != ""
+	iaParametro := "NXD_IA_PROVIDER"
+	if geminiKey != "" {
+		iaParametro = "GEMINI_API_KEY"
 	}
+	if vertexProject != "" {
+		iaParametro = "VERTEX_AI_PROJECT"
+	}
+	var iaFalta []string
+	if !iaConfigurado {
+		iaFalta = append(iaFalta, "Definir NXD_IA_PROVIDER=gemini ou NXD_IA_PROVIDER=vertex (e VERTEX_AI_PROJECT), ou GEMINI_API_KEY para API Gemini.")
+	}
+	if iaConfigurado && !iaOperando100 {
+		iaFalta = append(iaFalta, "Definir NXD_IA_PROVIDER=vertex e VERTEX_AI_PROJECT para relatórios NXD; implementar modelo em POST /api/report/ia (legado) se desejar.")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ia_operando_100": iaOperando100,
+		"ia_parametro":    iaParametro,
+		"ia_configurado":  iaConfigurado,
+		"ia_falta":        iaFalta,
+	})
+}
 
-	// Busca fábrica
-	factory, err := data.GetFactoryByAPIKey(apiKey)
+// AnalyticsHandler retorna métricas financeiras e de eficiência (api_key ou sessão)
+func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	factory, err := getFactoryFromRequest(r)
 	if err != nil || factory == nil {
-		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
 		return
 	}
 
@@ -332,17 +548,11 @@ func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// HealthStatusHandler retorna o status de conexão das máquinas
+// HealthStatusHandler retorna o status de conexão das máquinas (api_key ou sessão)
 func HealthStatusHandler(w http.ResponseWriter, r *http.Request) {
-	apiKey := r.URL.Query().Get("api_key")
-	if apiKey == "" {
-		http.Error(w, "API Key não fornecida", http.StatusBadRequest)
-		return
-	}
-
-	factory, err := data.GetFactoryByAPIKey(apiKey)
+	factory, err := getFactoryFromRequest(r)
 	if err != nil || factory == nil {
-		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
 		return
 	}
 
@@ -396,17 +606,11 @@ func getOverallHealthMessage(online, offline, critical int) string {
 	return "✅ Todas as máquinas comunicando normalmente."
 }
 
-// ConnectionLogsHandler retorna os logs de conexão/desconexão
+// ConnectionLogsHandler retorna os logs de conexão/desconexão (api_key ou sessão)
 func ConnectionLogsHandler(w http.ResponseWriter, r *http.Request) {
-	apiKey := r.URL.Query().Get("api_key")
-	if apiKey == "" {
-		http.Error(w, "API Key não fornecida", http.StatusBadRequest)
-		return
-	}
-
-	factory, err := data.GetFactoryByAPIKey(apiKey)
+	factory, err := getFactoryFromRequest(r)
 	if err != nil || factory == nil {
-		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
 		return
 	}
 
@@ -425,6 +629,141 @@ func ConnectionLogsHandler(w http.ResponseWriter, r *http.Request) {
 		"count":     len(logs),
 		"timestamp": time.Now().Format(time.RFC3339),
 		"notice":    "Estes logs mostram quando máquinas conectaram/desconectaram. Use para diagnóstico de problemas de rede.",
+	})
+}
+
+// ReportIARequest corpo do POST /api/report/ia
+type ReportIARequest struct {
+	SectorID    int      `json:"sector_id"`
+	MachineIDs  []int    `json:"machine_ids"`
+	Period      string   `json:"period"`
+	Shift       string   `json:"shift"`
+	DetailLevel string   `json:"detail_level"`
+	Niches      []string `json:"niches"`
+}
+
+// RastreabilidadeItem um item do "Caminho da Verdade"
+type RastreabilidadeItem struct {
+	Metrica       string `json:"metrica"`
+	Fonte          string `json:"fonte"`
+	Origem         string `json:"origem"`
+	Processamento  string `json:"processamento"`
+	DataHora       string `json:"data_hora"`
+}
+
+// ReportIAHandler gera relatório com filtros e rastreabilidade (Central de IA)
+func ReportIAHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+		return
+	}
+	factory, err := getFactoryFromRequest(r)
+	if err != nil || factory == nil {
+		http.Error(w, "API Key não fornecida ou faça login", http.StatusBadRequest)
+		return
+	}
+	var req ReportIARequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Payload inválido", http.StatusBadRequest)
+		return
+	}
+	machines, err := data.GetMachinesByFactory(factory.ID)
+	if err != nil {
+		http.Error(w, "Erro ao buscar máquinas", http.StatusInternalServerError)
+		return
+	}
+	if len(req.MachineIDs) > 0 {
+		m := make(map[int]bool)
+		for _, id := range req.MachineIDs {
+			m[id] = true
+		}
+		var filtered []core.Machine
+		for _, mc := range machines {
+			if m[mc.ID] {
+				filtered = append(filtered, mc)
+			}
+		}
+		machines = filtered
+	} else if req.SectorID > 0 {
+		var filtered []core.Machine
+		for _, mc := range machines {
+			if mc.SectorID != nil && *mc.SectorID == req.SectorID {
+				filtered = append(filtered, mc)
+			}
+		}
+		machines = filtered
+	}
+	now := time.Now().Format("02/01/2006 15:04:05")
+	var rastreabilidade []RastreabilidadeItem
+	totalPecas := 0
+	totalLucroCessante := 0.0
+	online, offline := 0, 0
+	var reportLines []string
+	reportLines = append(reportLines, fmt.Sprintf("Relatório NXD — %s — Fábrica: %s", now, factory.Name))
+	reportLines = append(reportLines, fmt.Sprintf("Período: %s | Turno: %s | Detalhamento: %s", req.Period, req.Shift, req.DetailLevel))
+	reportLines = append(reportLines, "")
+	for _, machine := range machines {
+		values, _ := data.GetLatestDataPoints(machine.ID)
+		status := parseBool(values["Status_Producao"])
+		if status {
+			online++
+		} else {
+			offline++
+		}
+		pecas := parseInt(values["Total_Pecas"])
+		totalPecas += pecas
+		custoHora := parseFloat(values["Custo_Hora_Parada"])
+		lucro := 0.0
+		if !status && custoHora > 0 {
+			lucro = (5.0 / 60.0) * custoHora
+			totalLucroCessante += lucro
+		}
+		name := machine.DisplayName
+		if name == "" {
+			name = machine.Name
+		}
+		rastreabilidade = append(rastreabilidade, RastreabilidadeItem{
+			Metrica:       "Total_Pecas",
+			Fonte:         "Última leitura DX (data_points)",
+			Origem:        fmt.Sprintf("Máquina %s, Tag Total_Pecas", name),
+			Processamento: "Leitura direta do CLP",
+			DataHora:      now,
+		})
+		rastreabilidade = append(rastreabilidade, RastreabilidadeItem{
+			Metrica:       "Status_Producao",
+			Fonte:         "Última leitura DX",
+			Origem:        fmt.Sprintf("Máquina %s, Tag Status_Producao", name),
+			Processamento: "Leitura direta (bool)",
+			DataHora:      now,
+		})
+		if custoHora > 0 {
+			rastreabilidade = append(rastreabilidade, RastreabilidadeItem{
+				Metrica:       "Lucro cessante (estimado)",
+				Fonte:         "Agregado NXD",
+				Origem:        fmt.Sprintf("Máquina %s, Custo_Hora_Parada", name),
+				Processamento: "(5/60) * Custo_Hora_Parada quando Status_Producao = false",
+				DataHora:      now,
+			})
+		}
+		if req.DetailLevel == "medio" || req.DetailLevel == "detalhado" {
+			reportLines = append(reportLines, fmt.Sprintf("• %s: %d peças, operando=%v, lucro cessante est.= R$ %.2f", name, pecas, status, lucro))
+		}
+	}
+	reportLines = append(reportLines, "")
+	reportLines = append(reportLines, fmt.Sprintf("Resumo: %d máquina(s) | Produção total (última leitura): %d peças | Lucro cessante estimado: R$ %.2f", len(machines), totalPecas, totalLucroCessante))
+	reportLines = append(reportLines, "Todos os valores são rastreáveis na seção Rastreabilidade abaixo.")
+	rastreabilidade = append(rastreabilidade, RastreabilidadeItem{
+		Metrica:       "Produção total (agregado)",
+		Fonte:         "Soma das leituras Total_Pecas por máquina",
+		Origem:        "NXD dashboard aggregate",
+		Processamento: "Soma(Total_Pecas) por máquina no escopo",
+		DataHora:      now,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"report":         strings.Join(reportLines, "\n"),
+		"rastreabilidade": rastreabilidade,
+		"timestamp":      time.Now().Format(time.RFC3339),
 	})
 }
 

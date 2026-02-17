@@ -167,6 +167,81 @@ body {
     font-size: 14px;
 }
 
+/* Dashboard de Alívio - cards de resumo */
+.alivio-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.alivio-card {
+    background: rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    border: 1px solid rgba(255,255,255,0.15);
+}
+.alivio-card.operando { border-left: 4px solid var(--success); }
+.alivio-card.paradas { border-left: 4px solid var(--warning); }
+.alivio-card.criticos { border-left: 4px solid var(--danger); }
+.alivio-card.producao { border-left: 4px solid #6366f1; }
+.alivio-card.lucro { border-left: 4px solid #8b5cf6; }
+.alivio-number {
+    display: block;
+    font-size: 28px;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 4px;
+}
+.alivio-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.75);
+}
+.alivio-message {
+    margin-bottom: 20px;
+    padding: 12px 16px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 8px;
+    color: rgba(255,255,255,0.9);
+    font-size: 14px;
+}
+.section-title {
+    color: rgba(255,255,255,0.9);
+    font-size: 18px;
+    margin-bottom: 12px;
+}
+
+.sectors-list { list-style: none; padding: 0; margin: 0 0 20px; }
+.sectors-list li { padding: 8px 12px; background: rgba(255,255,255,0.06); border-radius: 8px; margin-bottom: 6px; }
+.ativos-table-wrap { overflow-x: auto; }
+.ativos-table-wrap .data-table { margin-top: 0; }
+.form-row { margin-bottom: 12px; }
+.form-row label { display: block; margin-bottom: 4px; color: rgba(255,255,255,0.8); font-size: 14px; }
+.form-row select, .form-row input[type="text"] { width: 100%; max-width: 320px; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: #fff; }
+.checkbox-group { display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.checkbox-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; color: rgba(255,255,255,0.9); }
+.report-ia-result { margin-top: 24px; padding: 20px; background: rgba(0,0,0,0.2); border-radius: 12px; }
+.report-text { white-space: pre-wrap; color: rgba(255,255,255,0.95); line-height: 1.6; margin-bottom: 20px; }
+.rastreabilidade-intro { color: rgba(255,255,255,0.7); font-size: 14px; margin-bottom: 12px; }
+.rastreabilidade-list { display: flex; flex-direction: column; gap: 10px; }
+.rastreabilidade-item { padding: 12px; background: rgba(255,255,255,0.06); border-radius: 8px; font-size: 13px; color: rgba(255,255,255,0.9); }
+.rastreabilidade-item strong { display: block; margin-bottom: 4px; }
+
+.nxd-ativos-toolbar { margin-bottom: 16px; }
+.nxd-ativos-toolbar label { margin-right: 8px; }
+.nxd-ativos-toolbar select { padding: 8px 12px; border-radius: 8px; min-width: 200px; }
+.nxd-ativos-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+.nxd-col-left, .nxd-col-right { min-height: 200px; }
+.nxd-asset-list, .nxd-group-assets { list-style: none; padding: 0; margin: 0; }
+.nxd-asset-item { padding: 8px 12px; background: rgba(255,255,255,0.06); border-radius: 8px; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nxd-asset-name { flex: 1; }
+.nxd-move-select { padding: 4px 8px; border-radius: 6px; }
+.nxd-setores-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.nxd-groups-cards { display: flex; flex-direction: column; gap: 12px; }
+.nxd-group-card { padding: 16px; background: rgba(0,0,0,0.2); border-radius: 12px; }
+.nxd-group-header { margin-bottom: 8px; }
+.nxd-group-name { width: 100%; padding: 6px 10px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); color: #fff; }
+
 /* Login Section */
 .login-container {
     display: flex;

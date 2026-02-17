@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -110,11 +111,52 @@ func RunMigrations() error {
 		`CREATE INDEX IF NOT EXISTS idx_machines_factory ON machines(factory_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_tags_machine ON tags(machine_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)`,
+		// Usuários (Google Auth)
+		`CREATE TABLE IF NOT EXISTS users (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			email TEXT UNIQUE NOT NULL,
+			name TEXT NOT NULL,
+			google_uid TEXT UNIQUE NOT NULL,
+			terms_accepted_at DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_users_google_uid ON users(google_uid)`,
+		// Setores (baias) por fábrica
+		`CREATE TABLE IF NOT EXISTS sectors (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			factory_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (factory_id) REFERENCES factories(id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sectors_factory ON sectors(factory_id)`,
+		// Máquina pertence a um setor (1:1)
+		`CREATE TABLE IF NOT EXISTS machine_sector (
+			machine_id INTEGER PRIMARY KEY,
+			sector_id INTEGER NOT NULL,
+			FOREIGN KEY (machine_id) REFERENCES machines(id),
+			FOREIGN KEY (sector_id) REFERENCES sectors(id)
+		)`,
 	}
 
 	for i, migration := range migrations {
 		if _, err := DB.Exec(migration); err != nil {
 			return fmt.Errorf("erro na migração %d: %w", i+1, err)
+		}
+	}
+
+	// Migrações aditivas (ALTER)
+	alters := []string{
+		`ALTER TABLE factories ADD COLUMN user_id INTEGER`,
+		`ALTER TABLE machines ADD COLUMN display_name TEXT`,
+		`ALTER TABLE machines ADD COLUMN notes TEXT`,
+	}
+	for _, alt := range alters {
+		if _, err := DB.Exec(alt); err != nil {
+			// Ignora se a coluna já existir (SQLite não tem IF NOT EXISTS para coluna)
+			if !strings.Contains(err.Error(), "duplicate column") {
+				log.Printf("Aviso: migração ALTER %v", err)
+			}
 		}
 	}
 

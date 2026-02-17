@@ -16,6 +16,9 @@ logs/
 
 # Environment
 .env
+# Vertex AI service account key (nunca commitar)
+vertex-sa-key.json
+.credentials/
 
 # IDE
 .vscode/

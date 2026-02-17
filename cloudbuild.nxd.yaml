@@ -1,0 +1,5 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-f', 'Dockerfile.nxd-unified', '-t', 'us-central1-docker.pkg.dev/slideflow-prod/nxd-repo/nxd-core:latest', '.']
+images:
+  - 'us-central1-docker.pkg.dev/slideflow-prod/nxd-repo/nxd-core:latest'
