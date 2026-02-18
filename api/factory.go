@@ -33,7 +33,7 @@ func GenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Atualiza a api_key_hash para o usuário/fábrica correspondente
-	_, err = db.Exec("UPDATE factories SET api_key_hash = ? WHERE user_id = ?", string(apiKeyHash), userID)
+	_, err = db.Exec("UPDATE factories SET api_key_hash = $1 WHERE user_id = $2", string(apiKeyHash), userID)
 	if err != nil {
 		http.Error(w, "Falha ao salvar a chave de API", http.StatusInternalServerError)
 		return

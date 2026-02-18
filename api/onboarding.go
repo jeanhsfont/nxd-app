@@ -41,7 +41,7 @@ func OnboardingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Atualizar a tabela 'users'
-	_, err = tx.Exec("UPDATE users SET full_name = ?, cpf = ?, two_factor_enabled = ? WHERE id = ?",
+	_, err = tx.Exec("UPDATE users SET full_name = $1, cpf = $2, two_factor_enabled = $3 WHERE id = $4",
 		data.PersonalData.FullName, data.PersonalData.CPF, data.TwoFactorEnabled, userID)
 	if err != nil {
 		tx.Rollback()
@@ -60,12 +60,12 @@ func OnboardingHandler(w http.ResponseWriter, r *http.Request) {
 	// Inserir ou atualizar a tabela 'factories' com a chave
 	_, err = tx.Exec(`
 		INSERT INTO factories (user_id, name, cnpj, address, api_key_hash) 
-		VALUES (?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT(user_id) DO UPDATE SET
-		name = excluded.name,
-		cnpj = excluded.cnpj,
-		address = excluded.address,
-		api_key_hash = excluded.api_key_hash;
+		name = EXCLUDED.name,
+		cnpj = EXCLUDED.cnpj,
+		address = EXCLUDED.address,
+		api_key_hash = EXCLUDED.api_key_hash
 	`, userID, data.FactoryData.Name, data.FactoryData.CNPJ, data.FactoryData.Address, string(apiKeyHash))
 	if err != nil {
 		tx.Rollback()

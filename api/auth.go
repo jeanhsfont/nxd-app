@@ -114,7 +114,7 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 func GetUserByEmail(email string) (*User, error) {
 	db := GetDB()
-	row := db.QueryRow("SELECT id, email, password_hash FROM users WHERE email = ?", email)
+	row := db.QueryRow("SELECT id, email, password_hash FROM users WHERE email = $1", email)
 	user := &User{}
 	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash)
 	if err != nil {
@@ -125,9 +125,13 @@ func GetUserByEmail(email string) (*User, error) {
 
 func CreateUser(email, passwordHash, name string) (int64, error) {
 	db := GetDB()
-	result, err := db.Exec("INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)", email, passwordHash, name)
+	var id int64
+	err := db.QueryRow(
+		"INSERT INTO users (email, password_hash, full_name) VALUES ($1, $2, $3) RETURNING id",
+		email, passwordHash, name,
+	).Scan(&id)
 	if err != nil {
 		return 0, err
 	}
-	return result.LastInsertId()
+	return id, nil
 }
