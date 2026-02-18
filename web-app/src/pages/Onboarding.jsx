@@ -97,20 +97,13 @@ export default function Onboarding() {
                 <div>
                   <h2 className="text-xl font-semibold mb-4">Passo 3: Segurança da Conta</h2>
                   <p className="text-gray-600 mb-4">
-                    Para garantir a integridade dos seus dados e liberar a geração da chave de API, é obrigatório ativar a autenticação de dois fatores (2FA).
+                    Configure os dados da sua fábrica e gere sua chave de API para conectar dispositivos.
                   </p>
-                  <div className="p-4 bg-gray-100 rounded-lg mb-4">
-                    <p className="text-center font-semibold">[Simulação de Ativação de 2FA]</p>
-                  </div>
-                  <div className="flex items-center mb-6">
-                    <input type="checkbox" id="2fa-check" className="mr-2" checked={isTwoFactorEnabled} onChange={(e) => setIsTwoFactorEnabled(e.target.checked)} />
-                    <label htmlFor="2fa-check">Li e ativei a autenticação de dois fatores.</label>
-                  </div>
                   <div className="flex justify-between">
                     <button onClick={handlePrevStep} className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg">
                       Anterior
                     </button>
-                    <button onClick={handleSubmit} disabled={!isTwoFactorEnabled} className="w-1/2 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400">
+                    <button onClick={handleSubmit} className="w-1/2 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">
                       Finalizar Cadastro e Gerar Chave
                     </button>
                   </div>
