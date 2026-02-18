@@ -7,54 +7,62 @@ import (
 	"sync"
 
 	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 var (
-	nxdDB   *sql.DB
-	nxdOnce sync.Once
+	nxdDB    *sql.DB
+	nxdOnce  sync.Once
+	dbDriver string
 )
 
-// NXDDB returns the Postgres connection for NXD. Returns nil if NXD_DATABASE_URL is not set.
 func NXDDB() *sql.DB {
 	return nxdDB
 }
 
-// InitNXDDB opens Postgres and runs migrations when NXD_DATABASE_URL is set.
-// Safe to call multiple times; only the first call does work.
 func InitNXDDB() error {
 	var err error
 	nxdOnce.Do(func() {
 		connURL := os.Getenv("NXD_DATABASE_URL")
-		if connURL == "" {
-			log.Println("NXD: NXD_DATABASE_URL not set; /nxd/* stack disabled")
-			return
+		if connURL != "" {
+			// Modo Produção: PostgreSQL
+			dbDriver = "postgres"
+			log.Println("✓ Usando banco de dados PostgreSQL (produção).")
+			nxdDB, err = sql.Open(dbDriver, connURL)
+		} else {
+			// Modo Desenvolvimento: SQLite
+			dbDriver = "sqlite3"
+			log.Println("✓ Usando banco de dados SQLite (desenvolvimento).")
+			nxdDB, err = sql.Open(dbDriver, "./nxd.db")
 		}
-		nxdDB, err = sql.Open("postgres", connURL)
+
 		if err != nil {
 			return
 		}
+
 		if err = nxdDB.Ping(); err != nil {
+			log.Printf("❌ Erro ao conectar com o banco de dados: %v", err)
 			nxdDB.Close()
 			nxdDB = nil
 			return
 		}
-		if err = RunMigrations(nxdDB); err != nil {
+		log.Println("✓ Conexão com o banco de dados estabelecida com sucesso.")
+
+		if err = RunMigrations(nxdDB, dbDriver); err != nil {
+			log.Printf("❌ Erro ao executar migrações: %v", err)
 			nxdDB.Close()
 			nxdDB = nil
 			return
 		}
-		if err = SeedReportTemplates(nxdDB); err != nil {
-			log.Printf("NXD: seed report_templates warning: %v", err)
-		}
-		log.Println("NXD: Postgres connected and migrations applied")
 	})
 	return err
 }
 
-// CloseNXDDB closes the NXD Postgres connection. Safe to call if not initialized.
 func CloseNXDDB() {
 	if nxdDB != nil {
 		nxdDB.Close()
 		nxdDB = nil
 	}
 }
+
+

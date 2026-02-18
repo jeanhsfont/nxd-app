@@ -1,6 +1,6 @@
 import React from 'react';
 import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Cuboid, Bot, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Cuboid, Bot, Settings, LogOut, Network } from 'lucide-react';
 import { clsx } from 'clsx';
 
 function NavItem({ to, icon: Icon, children }) {
@@ -41,11 +41,13 @@ export default function MainLayout() {
           </div>
           <NavItem to="/" icon={LayoutDashboard}>Dashboard</NavItem>
           <NavItem to="/assets" icon={Cuboid}>Gestão de Ativos</NavItem>
+          <NavItem to="/sectors" icon={Network}>Gestão de Setores</NavItem>
           
           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">
             Inteligência
           </div>
           <NavItem to="/ia" icon={Bot}>Chat IA & Reports</NavItem>
+          <NavItem to="/ia-reports" icon={Bot}>Análise IA</NavItem>
 
           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">
             Configuração

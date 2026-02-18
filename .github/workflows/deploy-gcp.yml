@@ -1,4 +1,4 @@
-name: Deploy to Google Cloud Run
+name: Deploy HubSystem/NXD to Google Cloud Run
 
 on:
   push:
@@ -9,12 +9,11 @@ env:
   PROJECT_ID: slideflow-prod
   GCP_PROJECT_NUMBER: 925156909645
   GAR_LOCATION: us-central1
-  SERVICE: nxd-core
+  SERVICE: hubsystem-backend
   REGION: us-central1
   GCP_SERVICE_ACCOUNT: 925156909645-compute@developer.gserviceaccount.com
-  WIF_POOL: nxd-github-pool
-  WIF_PROVIDER: nxd-github-provider
   WIF_PROVIDER_RESOURCE: projects/925156909645/locations/global/workloadIdentityPools/nxd-github-pool/providers/nxd-github-provider
+  IMAGE: us-central1-docker.pkg.dev/slideflow-prod/nxd-repo/hubsystem-backend:latest
 
 jobs:
   build-and-deploy:
@@ -26,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Google Auth via WIF
         id: auth
@@ -37,22 +36,29 @@ jobs:
           service_account: '${{ env.GCP_SERVICE_ACCOUNT }}'
           token_format: access_token
 
-      - name: Set up Cloud SDK
-        uses: 'google-github-actions/setup-gcloud@v1'
-
-      - name: Configure Docker
+      - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev --quiet
 
-      - name: Build and Push Container
-        run: |-
-          gcloud builds submit --tag ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE }}/${{ env.SERVICE }}:latest .
+      - name: Build Unified Image (React + Go)
+        run: |
+          docker build \
+            -f Dockerfile.nxd-unified \
+            -t ${{ env.IMAGE }} \
+            .
+
+      - name: Push Image to Artifact Registry
+        run: docker push ${{ env.IMAGE }}
 
       - name: Deploy to Cloud Run
-        run: |-
+        run: |
           gcloud run deploy ${{ env.SERVICE }} \
-            --image ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.SERVICE }}/${{ env.SERVICE }}:latest \
+            --image ${{ env.IMAGE }} \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
             --service-account ${{ env.GCP_SERVICE_ACCOUNT }} \
-            --add-cloudsql-instances ${{ env.PROJECT_ID }}:${{ env.REGION }}:nxd-sql-instance
+            --add-cloudsql-instances ${{ env.PROJECT_ID }}:${{ env.REGION }}:nxd-sql-instance \
+            --set-secrets=DATABASE_URL=NXD_DATABASE_URL:latest,JWT_SECRET=JWT_SECRET_NXD:latest \
+            --set-env-vars=NXD_IA_PROVIDER=vertex,VERTEX_AI_PROJECT=${{ env.PROJECT_ID }},VERTEX_AI_LOCATION=${{ env.REGION }} \
+            --min-instances=1 \
+            --max-instances=20

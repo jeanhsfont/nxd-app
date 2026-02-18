@@ -1,135 +1,97 @@
 package api
 
 import (
-	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"os"
 	"time"
 
-	"hubsystem/core"
-	"hubsystem/data"
-
 	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
+	"golang.org/x/crypto/bcrypt"
 )
 
-const (
-	cookieName   = "nxd_session"
-	cookieMaxAge = 7 * 24 * 3600 // 7 dias
-)
+var jwtSecret []byte
 
-type contextKey string
-
-const userContextKey contextKey = "user"
-
-var (
-	googleOAuthConfig *oauth2.Config
-	jwtSecret         []byte
-	baseURL           string
-)
-
-func init() {
-	initAuth()
-}
-
-func initAuth() {
-	clientID := os.Getenv("GOOGLE_CLIENT_ID")
-	clientSecret := os.Getenv("GOOGLE_CLIENT_SECRET")
-	if clientID == "" || clientSecret == "" {
-		return
-	}
-	baseURL = os.Getenv("BASE_URL")
-	if baseURL == "" {
-		baseURL = "http://localhost:8080"
-	}
+func InitAuth() {
 	jwtSecret = []byte(os.Getenv("JWT_SECRET"))
 	if len(jwtSecret) == 0 {
-		jwtSecret = []byte("nxd-dev-secret-change-in-production")
-	}
-	googleOAuthConfig = &oauth2.Config{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		RedirectURL:  baseURL + "/api/auth/google/callback",
-		Scopes:       []string{"email", "profile"},
-		Endpoint:     google.Endpoint,
+		jwtSecret = []byte("super-secret-key-for-local-dev")
 	}
 }
 
-// Claims do JWT
+type User struct {
+	ID           int64  `json:"id"`
+	Email        string `json:"email"`
+	PasswordHash string `json:"-"`
+}
+
 type jwtClaims struct {
-	UserID int `json:"user_id"`
+	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
-// GoogleLoginHandler redireciona para o Google OAuth
-func GoogleLoginHandler(w http.ResponseWriter, r *http.Request) {
-	if googleOAuthConfig == nil {
-		http.Error(w, "Google Auth não configurado (GOOGLE_CLIENT_ID/SECRET)", http.StatusServiceUnavailable)
+func RegisterHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Corpo da requisição inválido"}`, http.StatusBadRequest)
 		return
 	}
-	state, _ := core.GenerateAPIKey()
-	if state == "" {
-		state = "nxd_oauth_state"
+
+	if req.Email == "" || req.Password == "" || req.Name == "" {
+		http.Error(w, `{"error":"Nome, email e senha são obrigatórios"}`, http.StatusBadRequest)
+		return
 	}
-	// Em produção guardar state em cookie/cache e validar no callback
-	url := googleOAuthConfig.AuthCodeURL(state, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "select_account"))
-	http.Redirect(w, r, url, http.StatusFound)
+
+	_, err := GetUserByEmail(req.Email)
+	if err == nil {
+		http.Error(w, `{"error":"Este email já está em uso"}`, http.StatusConflict)
+		return
+	}
+	if err != sql.ErrNoRows {
+		http.Error(w, `{"error":"Erro ao verificar usuário"}`, http.StatusInternalServerError)
+		return
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, `{"error":"Falha ao processar senha"}`, http.StatusInternalServerError)
+		return
+	}
+
+	if _, err := CreateUser(req.Email, string(passwordHash), req.Name); err != nil {
+		http.Error(w, `{"error":"Falha ao criar usuário"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Usuário criado com sucesso"})
 }
 
-// GoogleCallbackHandler troca o code por token e cria sessão
-func GoogleCallbackHandler(w http.ResponseWriter, r *http.Request) {
-	if googleOAuthConfig == nil {
-		http.Error(w, "Google Auth não configurado", http.StatusServiceUnavailable)
+func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"Corpo da requisição inválido"}`, http.StatusBadRequest)
 		return
-	}
-	code := r.URL.Query().Get("code")
-	if code == "" {
-		http.Redirect(w, r, "/#login?error=no_code", http.StatusFound)
-		return
-	}
-	token, err := googleOAuthConfig.Exchange(context.Background(), code)
-	if err != nil {
-		http.Redirect(w, r, "/#login?error=exchange", http.StatusFound)
-		return
-	}
-	client := googleOAuthConfig.Client(context.Background(), token)
-	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
-	if err != nil || resp.StatusCode != http.StatusOK {
-		http.Redirect(w, r, "/#login?error=userinfo", http.StatusFound)
-		return
-	}
-	defer resp.Body.Close()
-	var info struct {
-		ID      string `json:"id"`
-		Email   string `json:"email"`
-		Name    string `json:"name"`
-		Picture string `json:"picture"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		http.Redirect(w, r, "/#login?error=decode", http.StatusFound)
-		return
-	}
-	if info.Email == "" {
-		info.Email = info.ID + "@google"
-	}
-	if info.Name == "" {
-		info.Name = info.Email
 	}
 
-	user, err := data.GetUserByGoogleUID(info.ID)
+	user, err := GetUserByEmail(req.Email)
 	if err != nil {
-		http.Redirect(w, r, "/#login?error=db", http.StatusFound)
+		http.Error(w, `{"error":"Credenciais inválidas"}`, http.StatusUnauthorized)
 		return
 	}
-	if user == nil {
-		userID, err := data.CreateUser(info.Email, info.Name, info.ID, nil)
-		if err != nil {
-			http.Redirect(w, r, "/#login?error=create_user", http.StatusFound)
-			return
-		}
-		user = &core.User{ID: userID, Email: info.Email, Name: info.Name, GoogleUID: info.ID, CreatedAt: time.Now()}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		http.Error(w, `{"error":"Credenciais inválidas"}`, http.StatusUnauthorized)
+		return
 	}
 
 	claims := jwtClaims{
@@ -142,89 +104,30 @@ func GoogleCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenStr, err := jwtToken.SignedString(jwtSecret)
 	if err != nil {
-		http.Redirect(w, r, "/#login?error=jwt", http.StatusFound)
+		http.Error(w, `{"error":"Falha ao gerar token"}`, http.StatusInternalServerError)
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName,
-		Value:    tokenStr,
-		Path:     "/",
-		MaxAge:   cookieMaxAge,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   baseURL != "" && baseURL[0:5] == "https",
-	})
-	// Redirecionar para o app (frontend)
-	frontURL := os.Getenv("FRONTEND_URL")
-	if frontURL == "" {
-		frontURL = baseURL
-	}
-	http.Redirect(w, r, frontURL+"/#/dashboard", http.StatusFound)
-}
-
-// AuthMeHandler retorna o usuário atual e a fábrica (se houver)
-func AuthMeHandler(w http.ResponseWriter, r *http.Request) {
-	user := UserFromRequest(r)
-	if user == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]string{"error": "não autenticado"})
-		return
-	}
-	factory, _ := data.GetFactoryByUserID(user.ID)
-	res := map[string]interface{}{
-		"user":    user,
-		"factory": nil,
-	}
-	if factory != nil {
-		// Não enviar api_key em listagem
-		f := *factory
-		f.APIKey = ""
-		res["factory"] = &f
-	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(res)
+	json.NewEncoder(w).Encode(map[string]string{"token": tokenStr})
 }
 
-// UserFromRequest extrai o user do JWT no cookie ou Authorization
-func UserFromRequest(r *http.Request) *core.User {
-	tokenStr := ""
-	if c, _ := r.Cookie(cookieName); c != nil {
-		tokenStr = c.Value
+func GetUserByEmail(email string) (*User, error) {
+	db := GetDB()
+	row := db.QueryRow("SELECT id, email, password_hash FROM users WHERE email = ?", email)
+	user := &User{}
+	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash)
+	if err != nil {
+		return nil, err
 	}
-	if tokenStr == "" {
-		if b := r.Header.Get("Authorization"); len(b) > 7 && b[:7] == "Bearer " {
-			tokenStr = b[7:]
-		}
-	}
-	if tokenStr == "" {
-		return nil
-	}
-	token, err := jwt.ParseWithClaims(tokenStr, &jwtClaims{}, func(t *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
-	})
-	if err != nil || !token.Valid {
-		return nil
-	}
-	claims, ok := token.Claims.(*jwtClaims)
-	if !ok {
-		return nil
-	}
-	user, _ := data.GetUserByID(claims.UserID)
-	return user
+	return user, nil
 }
 
-// RequireAuth é um middleware que exige usuário logado
-func RequireAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if UserFromRequest(r) == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{"error": "faça login"})
-			return
-		}
-		next(w, r)
+func CreateUser(email, passwordHash, name string) (int64, error) {
+	db := GetDB()
+	result, err := db.Exec("INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)", email, passwordHash, name)
+	if err != nil {
+		return 0, err
 	}
+	return result.LastInsertId()
 }
-

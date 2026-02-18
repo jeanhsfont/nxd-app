@@ -4,7 +4,23 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+
+	"golang.org/x/crypto/bcrypt"
 )
+
+// GenerateAndHashAPIKey gera uma chave de API, seu hash bcrypt e a retorna.
+func GenerateAndHashAPIKey() (apiKey string, hash []byte, err error) {
+	bytes := make([]byte, 32)
+	if _, err = rand.Read(bytes); err != nil {
+		return "", nil, fmt.Errorf("erro ao gerar bytes da API key: %w", err)
+	}
+	apiKey = "NXD_" + hex.EncodeToString(bytes)
+	hash, err = bcrypt.GenerateFromPassword([]byte(apiKey), bcrypt.DefaultCost)
+	if err != nil {
+		return "", nil, fmt.Errorf("erro ao gerar hash da API key: %w", err)
+	}
+	return apiKey, hash, nil
+}
 
 // GenerateAPIKey gera uma chave API única e segura
 func GenerateAPIKey() (string, error) {

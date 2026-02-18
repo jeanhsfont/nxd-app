@@ -2,58 +2,59 @@ package core
 
 import "time"
 
-// User representa um usuário logado (Google)
+// User representa um usuário logado
 type User struct {
-	ID               int       `json:"id"`
-	Email            string    `json:"email"`
-	Name             string    `json:"name"`
-	GoogleUID        string    `json:"-"` // não expor
-	TermsAcceptedAt  *time.Time `json:"terms_accepted_at"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	Email           string    `json:"email"`
+	Name            string    `json:"name"`
+	PasswordHash    string    `json:"-"` // não expor
+	TermsAcceptedAt *time.Time `json:"terms_accepted_at,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // Factory representa uma unidade/fábrica cadastrada
 type Factory struct {
-	ID        int       `json:"id"`
-	UserID    *int      `json:"user_id,omitempty"` // dono da fábrica (1:1 por enquanto)
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
 	Name      string    `json:"name"`
-	APIKey    string    `json:"api_key,omitempty"` // omitir em listagens; mostrar só na criação/regeneração
+	APIKey    string    `json:"api_key,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	IsActive  bool      `json:"is_active"`
 }
 
 // Sector representa um setor/baia criado pelo usuário
 type Sector struct {
-	ID         int       `json:"id"`
-	FactoryID  int       `json:"factory_id"`
-	Name       string    `json:"name"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID        string    `json:"id"`
+	FactoryID string    `json:"factory_id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Machine representa uma máquina conectada
 type Machine struct {
-	ID         int       `json:"id"`
-	FactoryID  int       `json:"factory_id"`
-	DeviceID   string    `json:"device_id"`
-	Name       string    `json:"name"`
-	Brand      string    `json:"brand"`      // Siemens, Delta, Mitsubishi
-	Protocol   string    `json:"protocol"`   // S7, Modbus, etc
+	ID          string    `json:"id"`
+	FactoryID   string    `json:"factory_id"`
+	DeviceID    string    `json:"device_id"`
+	Name        string    `json:"name"`
+	Brand       string    `json:"brand"`
+	Protocol    string    `json:"protocol"`
 	LastSeen    time.Time `json:"last_seen"`
-	Status      string    `json:"status"`       // online, offline, error
+	Status      string    `json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
-	DisplayName string    `json:"display_name"` // nome que o gestor dá
+	DisplayName string    `json:"display_name"`
 	Notes       string    `json:"notes"`
-	SectorID    *int      `json:"sector_id,omitempty"`
+	SectorID    *string   `json:"sector_id,omitempty"`
 	SectorName  string    `json:"sector_name,omitempty"`
 }
 
 // Tag representa um ponto de dados (auto-discovery)
 type Tag struct {
-	ID          int       `json:"id"`
-	MachineID   int       `json:"machine_id"`
+	ID          string    `json:"id"`
+	MachineID   string    `json:"machine_id"`
 	TagName     string    `json:"tag_name"`
-	TagType     string    `json:"tag_type"`     // float, int, bool, string
-	Unit        string    `json:"unit"`         // °C, bar, rpm, etc
+	TagType     string    `json:"tag_type"`
+	Unit        string    `json:"unit"`
 	MinValue    *float64  `json:"min_value"`
 	MaxValue    *float64  `json:"max_value"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -62,12 +63,12 @@ type Tag struct {
 
 // DataPoint representa um valor recebido
 type DataPoint struct {
-	ID        int64     `json:"id"`
-	MachineID int       `json:"machine_id"`
-	TagID     int       `json:"tag_id"`
+	ID        string    `json:"id"`
+	MachineID string    `json:"machine_id"`
+	TagID     string    `json:"tag_id"`
 	Value     string    `json:"value"`
 	Timestamp time.Time `json:"timestamp"`
-	Quality   string    `json:"quality"` // good, bad, uncertain
+	Quality   string    `json:"quality"`
 }
 
 // IngestPayload é o formato que o DX envia

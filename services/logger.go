@@ -2,7 +2,7 @@ package services
 
 import (
 	"fmt"
-	"hubsystem/data"
+	"hubsystem/internal/nxd/store"
 	"io"
 	"log"
 	"os"
@@ -45,12 +45,12 @@ func CloseLogger() {
 
 // LogSuccess registra sucesso no banco de auditoria
 func LogSuccess(action, apiKey, deviceID, message, ipAddress string) {
-	data.LogAudit(action, apiKey, deviceID, "success", message, ipAddress)
+	store.LogAudit(action, apiKey, deviceID, "success", message, ipAddress)
 }
 
 // LogError registra erro no banco de auditoria
 func LogError(action, apiKey, deviceID, message, ipAddress string) {
-	data.LogAudit(action, apiKey, deviceID, "fail", message, ipAddress)
+	store.LogAudit(action, apiKey, deviceID, "fail", message, ipAddress)
 	log.Printf("❌ [%s] %s", action, message)
 }
 

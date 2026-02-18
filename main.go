@@ -2,11 +2,9 @@ package main
 
 import (
 	"hubsystem/api"
-	"hubsystem/data"
-	"hubsystem/internal/nxd/handler"
-	nxdmid "hubsystem/internal/nxd/middleware"
-	nxdstore "hubsystem/internal/nxd/store"
-	"hubsystem/services"
+	"hubsystem/api/middleware"
+	"hubsystem/internal/nxd/config"
+
 	"log"
 	"net/http"
 	"os"
@@ -19,87 +17,56 @@ import (
 )
 
 func main() {
+	log.SetOutput(os.Stdout)
+	log.Println("Application entrypoint reached. Starting server...")
+	api.InitAuth() // Carrega o segredo JWT
+	config.Load()
 	log.Println("🚀 Iniciando NXD (Nexus Data Exchange)...")
 
-	// Inicializa logger
-	if err := services.InitLogger(); err != nil {
-		log.Fatalf("❌ Erro ao inicializar logger: %v", err)
+	// Inicializa o banco de dados da API legada (SQLite ou Postgres via DATABASE_URL)
+	if os.Getenv("DATABASE_URL") == "" {
+		log.Println("ℹ️  DATABASE_URL not set. Initializing legacy API database with local SQLite.")
+	} else {
+		log.Println("ℹ️  DATABASE_URL is set. Initializing legacy API database with PostgreSQL.")
 	}
-	defer services.CloseLogger()
-
-	// Inicializa banco de dados
-	if err := data.InitDatabase(); err != nil {
-		log.Fatalf("❌ Erro ao inicializar banco: %v", err)
+	if err := api.InitDB(); err != nil {
+		log.Fatalf("❌ Erro ao inicializar banco de dados da API: %v", err)
 	}
-	defer data.Close()
-
-	// Executa migrações
-	if err := data.RunMigrations(); err != nil {
-		log.Fatalf("❌ Erro ao executar migrações: %v", err)
-	}
-
-	// NXD v2: Postgres (opcional; rotas /nxd/* só montadas se NXD_DATABASE_URL estiver definido)
-	if err := nxdstore.InitNXDDB(); err != nil {
-		log.Printf("⚠️ NXD Postgres init: %v", err)
-	}
-	defer nxdstore.CloseNXDDB()
 
 	// Configura rotas
 	router := mux.NewRouter()
-
-	// Rotas /nxd/* (add-only; não altera /api/*)
-	if nxdstore.NXDDB() != nil {
-		nxdRouter := router.PathPrefix("/nxd").Subrouter()
-		nxdRouter.HandleFunc("/ready", handler.Ready).Methods("GET")
-		nxdRouter.HandleFunc("/factories", nxdmid.RequireAuth(handler.ListFactories)).Methods("GET")
-		nxdRouter.HandleFunc("/factories", nxdmid.RequireAuth(handler.CreateFactory)).Methods("POST")
-		nxdRouter.HandleFunc("/groups", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.ListGroups))).Methods("GET")
-		nxdRouter.HandleFunc("/groups", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.CreateGroup))).Methods("POST")
-		nxdRouter.HandleFunc("/groups/{id}", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.UpdateGroup))).Methods("PATCH")
-		nxdRouter.HandleFunc("/assets", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.ListAssets))).Methods("GET")
-		nxdRouter.HandleFunc("/assets", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.CreateAsset))).Methods("POST")
-		nxdRouter.HandleFunc("/assets/{id}", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.UpdateAsset))).Methods("PATCH")
-		nxdRouter.HandleFunc("/assets/{id}/move", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.MoveAsset))).Methods("POST")
-		nxdRouter.HandleFunc("/factories/{id}/gateway-key", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.GenerateGatewayKey))).Methods("POST")
-		nxdRouter.HandleFunc("/telemetry/ingest", handler.TelemetryIngest).Methods("POST")
-		nxdRouter.HandleFunc("/health", handler.Health).Methods("GET")
-		nxdRouter.HandleFunc("/report-templates", handler.ListReportTemplates).Methods("GET")
-		nxdRouter.HandleFunc("/reports/run", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.RunReport))).Methods("POST")
-		nxdRouter.HandleFunc("/reports/{id}", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.GetReport))).Methods("GET")
-		nxdRouter.HandleFunc("/reports/{id}/export-pdf", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.ExportPDF))).Methods("POST")
-		nxdRouter.HandleFunc("/audit", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.AuditLog))).Methods("GET")
-		nxdRouter.HandleFunc("/jobs/rollup", handler.RollupJob).Methods("POST")
-		nxdRouter.HandleFunc("/jobs/alerts", handler.AlertsJob).Methods("POST")
-		nxdRouter.HandleFunc("/alert-rules", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.ListAlertRules))).Methods("GET")
-		nxdRouter.HandleFunc("/alert-rules", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.CreateAlertRule))).Methods("POST")
-		nxdRouter.HandleFunc("/alerts", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.ListAlerts))).Methods("GET")
-		nxdRouter.HandleFunc("/alerts/{id}/ack", nxdmid.RequireAuth(nxdmid.RequireFactory(handler.AckAlert))).Methods("POST")
-		log.Println("✓ NXD: rotas /nxd/* montadas")
-	}
-
-	// Inicia monitor de saúde das máquinas
-	services.StartHealthMonitor()
 
 	// API Routes
 	router.HandleFunc("/api/health", api.HealthHandler).Methods("GET")
 	router.HandleFunc("/api/system", api.SystemParamsHandler).Methods("GET")
 	router.HandleFunc("/api/ingest", api.IngestHandler).Methods("POST")
 	router.HandleFunc("/api/factory/create", api.CreateFactoryHandler).Methods("POST")
-	// Auth (Google OAuth2)
-	router.HandleFunc("/api/auth/google/login", api.GoogleLoginHandler).Methods("GET")
-	router.HandleFunc("/api/auth/google/callback", api.GoogleCallbackHandler).Methods("GET")
-	router.HandleFunc("/api/auth/me", api.AuthMeHandler).Methods("GET")
+	// Auth - Rotas Públicas
+	router.HandleFunc("/api/register", api.RegisterHandler).Methods("POST")
+	router.HandleFunc("/api/login", api.LoginHandler).Methods("POST")
+	router.HandleFunc("/api/onboarding", api.OnboardingHandler).Methods("POST")
+
+	// Rotas Autenticadas via JWT
+	authRouter := router.PathPrefix("/api").Subrouter()
+	authRouter.Use(middleware.AuthMiddleware)
 	// Fábrica (autenticado)
-	router.HandleFunc("/api/factory", api.RequireAuth(api.CreateFactoryAuthHandler)).Methods("POST")
-	router.HandleFunc("/api/factory/regenerate-api-key", api.RequireAuth(api.RegenerateAPIKeyHandler)).Methods("POST")
-	router.HandleFunc("/api/sectors", api.GetSectorsHandler).Methods("GET")
-	router.HandleFunc("/api/sectors", api.CreateSectorHandler).Methods("POST")
-	router.HandleFunc("/api/machine/asset", api.UpdateMachineAssetHandler).Methods("PUT")
+	authRouter.HandleFunc("/factory/generate-key", api.GenerateAPIKey).Methods("POST")
+	authRouter.HandleFunc("/factory", api.CreateFactoryAuthHandler).Methods("POST")
+	authRouter.HandleFunc("/factory/details", api.GetFactoryDetailsHandler).Methods("GET")
+	authRouter.HandleFunc("/factory/regenerate-api-key", api.RegenerateAPIKeyHandler).Methods("POST")
+	authRouter.HandleFunc("/sectors", api.GetSectorsHandler).Methods("GET")
+	authRouter.HandleFunc("/sectors", api.CreateSectorHandler).Methods("POST")
+	authRouter.HandleFunc("/sectors/{id}", api.UpdateSectorHandler).Methods("PUT")
+	authRouter.HandleFunc("/sectors/{id}", api.DeleteSectorHandler).Methods("DELETE")
+	authRouter.HandleFunc("/ia/analysis", api.ReportIAHandler).Methods("GET")
+	authRouter.HandleFunc("/machine/asset", api.UpdateMachineAssetHandler).Methods("PUT")
+	authRouter.HandleFunc("/report/ia", api.ReportIAHandler).Methods("POST")
+	authRouter.HandleFunc("/machine/delete", api.DeleteMachineHandler).Methods("DELETE")
+
+	// Rotas com autenticação via API Key (não usam JWT middleware)
 	router.HandleFunc("/api/dashboard", api.GetDashboardHandler).Methods("GET")
 	router.HandleFunc("/api/dashboard/summary", api.DashboardSummaryHandler).Methods("GET")
-	router.HandleFunc("/api/report/ia", api.ReportIAHandler).Methods("POST")
 	router.HandleFunc("/api/analytics", api.AnalyticsHandler).Methods("GET")
-	router.HandleFunc("/api/machine/delete", api.DeleteMachineHandler).Methods("DELETE")
 	router.HandleFunc("/api/connection/status", api.HealthStatusHandler).Methods("GET")
 	router.HandleFunc("/api/connection/logs", api.ConnectionLogsHandler).Methods("GET")
 	router.HandleFunc("/ws", api.WebSocketHandler)
@@ -131,11 +98,14 @@ func main() {
 
 	handler := c.Handler(router)
 
-	// Inicia servidor
+	// O Cloud Run define a variável de ambiente PORT para informar em qual porta
+	// o contêiner deve escutar.
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "8081"
+		log.Printf("⚠️ Variável de ambiente PORT não definida, usando porta padrão: %s", port)
 	}
+
 	log.Printf("✓ Servidor rodando em http://localhost:%s", port)
 	log.Println("✓ Endpoints disponíveis:")
 	log.Println("  - POST /api/ingest (Recebe dados do DX)")
@@ -157,7 +127,13 @@ func main() {
 		os.Exit(0)
 	}()
 
-	if err := http.ListenAndServe(":"+port, handler); err != nil {
+	// É crucial escutar em "0.0.0.0" (representado por ":" antes da porta)
+	// para aceitar conexões de fora do contêiner.
+	addr := ":" + port
+	log.Printf("🚀 Servidor escutando em %s", addr)
+
+	// Inicia o servidor HTTP. O log.Fatal irá encerrar a aplicação se o servidor não conseguir iniciar.
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatalf("❌ Erro ao iniciar servidor: %v", err)
 	}
 }

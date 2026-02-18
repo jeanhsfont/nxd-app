@@ -1,0 +1,37 @@
+steps:
+  # 1. Construir a imagem unificada (Frontend React + Backend Go)
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'Dockerfile.nxd-unified'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+      - '.'
+
+  # 2. Enviar a imagem para o Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+
+  # 3. Implantar no Cloud Run com Cloud SQL + Secrets + Vertex AI
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hubsystem-backend'
+      - '--image=us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+      - '--platform=managed'
+      - '--region=us-central1'
+      - '--allow-unauthenticated'
+      - '--service-account=925156909645-compute@developer.gserviceaccount.com'
+      - '--add-cloudsql-instances=slideflow-prod:us-central1:nxd-sql-instance'
+      - '--set-secrets=DATABASE_URL=NXD_DATABASE_URL:latest,JWT_SECRET=JWT_SECRET_NXD:latest'
+      - '--set-env-vars=NXD_IA_PROVIDER=vertex,VERTEX_AI_PROJECT=slideflow-prod,VERTEX_AI_LOCATION=us-central1'
+      - '--min-instances=1'
+      - '--max-instances=20'
+
+images:
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'

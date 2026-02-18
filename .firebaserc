@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "slideflow-prod"
+  },
+  "targets": {
+    "slideflow-prod": {
+      "hosting": {
+        "hubsystem-frontend": [
+          "slideflow-prod"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

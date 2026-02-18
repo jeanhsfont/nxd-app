@@ -14,8 +14,8 @@ import {
 } from '@dnd-kit/sortable';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
-import { Plus, Trash2, GripVertical, Factory, Box, Server } from 'lucide-react';
-import axios from 'axios';
+import { Plus, Trash2, GripVertical, Factory, Box, Server, KeyRound, Copy } from 'lucide-react';
+import api from '../utils/api';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -26,6 +26,34 @@ function cn(...inputs) {
 
 // --- Components ---
 
+function APIKeyDisplay({ apiKey }) {
+  const [copied, setCopied] = useState(false);
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(apiKey).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  if (!apiKey) return null;
+
+  return (
+    <div className="bg-gray-800 p-4 rounded-lg flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <KeyRound className="w-5 h-5 text-yellow-400" />
+        <span className="text-sm text-gray-300 font-mono break-all">{apiKey}</span>
+      </div>
+      <button
+        onClick={copyToClipboard}
+        className="bg-gray-700 text-white px-3 py-1 rounded-md hover:bg-gray-600 text-sm flex items-center gap-2"
+      >
+        <Copy className="w-4 h-4" />
+        {copied ? 'Copiado!' : 'Copiar'}
+      </button>
+    </div>
+  );
+}
 function DraggableMachine({ machine }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: machine.id,
@@ -139,26 +167,26 @@ function Sidebar({ machines }) {
 export default function AssetManagement() {
   const [sectors, setSectors] = useState([]);
   const [machines, setMachines] = useState([]);
+  const [factory, setFactory] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [newSectorName, setNewSectorName] = useState('');
 
-  // Mock initial data load
   useEffect(() => {
-    // In real app, fetch from API
-    // axios.get('/api/groups').then(...)
-    // axios.get('/api/assets').then(...)
-    
-    setSectors([
-      { id: 'sec-1', name: 'Usinagem A', metadata: { color: 'blue' } },
-      { id: 'sec-2', name: 'Montagem Final', metadata: { color: 'green' } },
-    ]);
-
-    setMachines([
-      { id: 'm-1', name: 'CNC-01', display_name: 'CNC Alpha', group_id: 'sec-1', status: 'online' },
-      { id: 'm-2', name: 'CNC-02', display_name: 'CNC Beta', group_id: null, status: 'offline' },
-      { id: 'm-3', name: 'Robot-Arm', display_name: 'Braço Robótico', group_id: 'sec-2', status: 'online' },
-      { id: 'm-4', name: 'Press-Hyd', display_name: 'Prensa Hidráulica', group_id: null, status: 'error' },
-    ]);
+    const fetchData = async () => {
+      try {
+        const [sectorsRes, machinesRes, factoryRes] = await Promise.all([
+          api.get('/api/sectors'),
+          api.get('/api/dashboard'), // Usando dashboard para pegar máquinas com status
+          api.get('/api/factory/details')
+        ]);
+        setSectors(sectorsRes.data.sectors || []);
+        setMachines(machinesRes.data.machines || []);
+        setFactory(factoryRes.data);
+      } catch (error) {
+        console.error("Erro ao buscar dados:", error);
+      }
+    };
+    fetchData();
   }, []);
 
   const sensors = useSensors(
@@ -173,7 +201,7 @@ export default function AssetManagement() {
     setActiveId(event.active.id);
   };
 
-  const handleDragEnd = (event) => {
+  const handleDragEnd = async (event) => {
     const { active, over } = event;
     setActiveId(null);
 
@@ -181,45 +209,54 @@ export default function AssetManagement() {
 
     const machineId = active.id;
     const overId = over.id;
+    let newSectorId = null;
 
-    // Se soltou na Sidebar (remover do grupo)
     if (overId === 'sidebar-droppable') {
-      setMachines(prev => prev.map(m => 
-        m.id === machineId ? { ...m, group_id: null } : m
-      ));
-      // TODO: Call API to update machine group_id = null
-      return;
+      newSectorId = 0; // Ou o valor que sua API espera para "sem setor"
+    } else {
+      const targetSector = sectors.find(s => s.id === overId);
+      if (targetSector) {
+        newSectorId = targetSector.id;
+      }
     }
 
-    // Se soltou em um Setor
-    // Check if overId is a sector id
-    const targetSector = sectors.find(s => s.id === overId);
-    if (targetSector) {
+    if (newSectorId !== null) {
+      // Atualiza o estado localmente para feedback imediato
       setMachines(prev => prev.map(m => 
-        m.id === machineId ? { ...m, group_id: targetSector.id } : m
+        m.id === machineId ? { ...m, sector_id: newSectorId } : m
       ));
-      // TODO: Call API to update machine group_id = targetSector.id
+      
+      // Chama a API para persistir a mudança
+      try {
+        await api.post('/api/machine/asset', { machine_id: machineId, sector_id: newSectorId });
+      } catch (error) {
+        console.error("Erro ao atualizar setor da máquina:", error);
+        // Reverte o estado se a API falhar (opcional, mas recomendado)
+      }
     }
   };
 
-  const createSector = () => {
+  const createSector = async () => {
     if (!newSectorName.trim()) return;
-    const newSector = {
-      id: `sec-${Date.now()}`,
-      name: newSectorName,
-    };
-    setSectors([...sectors, newSector]);
-    setNewSectorName('');
-    // TODO: Call API to create group
+    try {
+      const res = await api.post('/api/sectors', { name: newSectorName });
+      setSectors([...sectors, res.data]);
+      setNewSectorName('');
+    } catch (error) {
+      console.error("Erro ao criar setor:", error);
+    }
   };
 
-  const deleteSector = (id) => {
-    setSectors(prev => prev.filter(s => s.id !== id));
-    // Move machines back to available
-    setMachines(prev => prev.map(m => 
-      m.group_id === id ? { ...m, group_id: null } : m
-    ));
-    // TODO: Call API to delete group
+  const deleteSector = async (id) => {
+    try {
+      await api.delete(`/api/sectors/${id}`); // Assumindo que a API suporta DELETE
+      setSectors(prev => prev.filter(s => s.id !== id));
+      setMachines(prev => prev.map(m => 
+        m.sector_id === id ? { ...m, sector_id: 0 } : m
+      ));
+    } catch (error) {
+      console.error("Erro ao deletar setor:", error);
+    }
   };
 
   const activeMachine = activeId ? machines.find(m => m.id === activeId) : null;
@@ -233,33 +270,36 @@ export default function AssetManagement() {
     >
       <div className="flex h-[calc(100vh-64px)] bg-gray-100 font-sans overflow-hidden">
         {/* Sidebar */}
-        <Sidebar machines={machines.filter(m => m.group_id === null)} />
+        <Sidebar machines={machines.filter(m => !m.sector_id || m.sector_id === 0)} />
 
         {/* Main Content */}
         <main className="flex-1 p-8 overflow-y-auto">
-          <header className="flex justify-between items-center mb-8">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Gestão de Ativos</h1>
-              <p className="text-gray-500 mt-1">Organize suas máquinas em setores para análise de IA</p>
+          <header className="mb-8">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h1 className="text-3xl font-bold text-gray-900">Gestão de Ativos</h1>
+                <p className="text-gray-500 mt-1">Organize suas máquinas em setores para análise de IA</p>
+              </div>
+              
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Nome do novo setor..."
+                  className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                  value={newSectorName}
+                  onChange={e => setNewSectorName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && createSector()}
+                />
+                <button
+                  onClick={createSector}
+                  className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 font-medium transition-colors"
+                >
+                  <Plus className="w-5 h-5" />
+                  Criar Setor
+                </button>
+              </div>
             </div>
-            
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Nome do novo setor..."
-                className="px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                value={newSectorName}
-                onChange={e => setNewSectorName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && createSector()}
-              />
-              <button
-                onClick={createSector}
-                className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 flex items-center gap-2 font-medium transition-colors"
-              >
-                <Plus className="w-5 h-5" />
-                Criar Setor
-              </button>
-            </div>
+            <APIKeyDisplay apiKey={factory?.api_key} />
           </header>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -267,7 +307,7 @@ export default function AssetManagement() {
               <DroppableSector
                 key={sector.id}
                 sector={sector}
-                machines={machines.filter(m => m.group_id === sector.id)}
+                machines={machines.filter(m => m.sector_id === sector.id)}
                 onDelete={deleteSector}
               />
             ))}
