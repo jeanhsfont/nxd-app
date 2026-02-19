@@ -3,9 +3,11 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // InsertTelemetryBatch inserts multiple rows into telemetry_log. Asset must exist (caller ensures via CreateAsset).
@@ -76,3 +78,55 @@ type MetricEntry struct {
 }
 
 var _ = sql.ErrNoRows
+
+// BulkCopyTelemetryLog inserts a large batch of rows into nxd.telemetry_log
+// using PostgreSQL COPY FROM STDIN via lib/pq. This is 10-100x faster than
+// row-by-row INSERTs and is the correct method for historical import jobs.
+//
+// Unlike InsertTelemetryBatch (real-time, small payloads), this function expects
+// a *sql.Tx transaction — the caller controls commit/rollback for batch semantics.
+//
+// Columns: ts, factory_id, asset_id, metric_key, metric_value, status, raw, correlation_id
+func BulkCopyTelemetryLog(tx *sql.Tx, rows []BulkTelemetryRow) (int64, error) {
+	stmt, err := tx.Prepare(pq.CopyInSchema("nxd", "telemetry_log",
+		"ts", "factory_id", "asset_id", "metric_key", "metric_value", "status", "raw", "correlation_id",
+	))
+	if err != nil {
+		return 0, fmt.Errorf("bulkCopy prepare: %w", err)
+	}
+	defer stmt.Close()
+
+	for i, r := range rows {
+		rawStr := "null"
+		if len(r.Raw) > 0 {
+			rawStr = string(r.Raw)
+		}
+		status := r.Status
+		if status == "" {
+			status = "OK"
+		}
+		if _, err := stmt.Exec(r.Ts, r.FactoryID, r.AssetID, r.MetricKey, r.MetricValue, status, rawStr, r.CorrelationID); err != nil {
+			return int64(i), fmt.Errorf("bulkCopy row %d: %w", i, err)
+		}
+	}
+
+	// Flush the COPY buffer to PostgreSQL.
+	result, err := stmt.Exec()
+	if err != nil {
+		return 0, fmt.Errorf("bulkCopy flush: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	return n, nil
+}
+
+// BulkTelemetryRow is one row for BulkCopyTelemetryLog.
+type BulkTelemetryRow struct {
+	Ts            time.Time
+	FactoryID     uuid.UUID
+	AssetID       uuid.UUID
+	MetricKey     string
+	MetricValue   float64
+	Status        string
+	Raw           []byte
+	CorrelationID string
+}

@@ -119,8 +119,16 @@ func CreateAsset(db *sql.DB, factoryID uuid.UUID, groupID *uuid.UUID, sourceTagI
 	err := db.QueryRow(
 		`INSERT INTO nxd.assets (id, factory_id, group_id, source_tag_id, display_name, description, annotations)
 		 VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), $7::jsonb)
-		 ON CONFLICT (factory_id, source_tag_id) DO UPDATE SET group_id = EXCLUDED.group_id, display_name = EXCLUDED.display_name, description = EXCLUDED.description, annotations = EXCLUDED.annotations, updated_at = NOW()
+		 ON CONFLICT (factory_id, source_tag_id) DO UPDATE SET
+		     display_name = EXCLUDED.display_name,
+		     description  = EXCLUDED.description,
+		     annotations  = EXCLUDED.annotations,
+		     updated_at   = NOW()
 		 RETURNING id`,
+		// NOTE: group_id is intentionally NOT updated on conflict.
+		// Automatic ingest (DX) always sends groupID=nil; updating it would silently
+		// erase the sector assignment the user made via the UI.
+		// group_id is only changed by explicit MoveAsset() calls from the user.
 		id, factoryID, groupID, sourceTagID, displayName, description, annJSON,
 	).Scan(&out)
 	if err != nil {

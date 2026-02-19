@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"hubsystem/api"
 	"hubsystem/api/middleware"
 	"hubsystem/internal/nxd/config"
+	"hubsystem/internal/nxd/store"
 
 	"log"
 	"net/http"
@@ -33,6 +35,26 @@ func main() {
 		log.Fatalf("❌ Erro ao inicializar banco de dados da API: %v", err)
 	}
 
+	// Inicializa o banco de dados NXD (schema nxd.*)
+	if err := store.InitNXDDB(); err != nil {
+		log.Printf("⚠️  Erro ao inicializar banco NXD (store): %v — sistema continua sem NXD store", err)
+	} else {
+		log.Println("✓ Banco de dados NXD (store) inicializado.")
+	}
+
+	// Inicia o worker de importação de dados históricos ("Download Longo").
+	// Roda como goroutine; será interrompido quando o contexto for cancelado.
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	if nxdDB := store.NXDDB(); nxdDB != nil {
+		go store.RunImportWorker(workerCtx, nxdDB)
+		log.Println("✓ Worker de importação histórica iniciado.")
+	} else {
+		log.Println("⚠️  NXD DB indisponível — worker de importação não iniciado.")
+		workerCancel() // cancel imediatamente se não há DB
+		_ = workerCancel
+	}
+	defer workerCancel()
+
 	// Configura rotas
 	router := mux.NewRouter()
 
@@ -44,11 +66,12 @@ func main() {
 	// Auth - Rotas Públicas
 	router.HandleFunc("/api/register", api.RegisterHandler).Methods("POST")
 	router.HandleFunc("/api/login", api.LoginHandler).Methods("POST")
-	router.HandleFunc("/api/onboarding", api.OnboardingHandler).Methods("POST")
 
 	// Rotas Autenticadas via JWT
 	authRouter := router.PathPrefix("/api").Subrouter()
 	authRouter.Use(middleware.AuthMiddleware)
+	// Onboarding (autenticado — precisa do JWT para saber qual usuário está completando o cadastro)
+	authRouter.HandleFunc("/onboarding", api.OnboardingHandler).Methods("POST")
 	// Fábrica (autenticado)
 	authRouter.HandleFunc("/factory/generate-key", api.GenerateAPIKey).Methods("POST")
 	authRouter.HandleFunc("/factory", api.CreateFactoryAuthHandler).Methods("POST")
@@ -58,10 +81,25 @@ func main() {
 	authRouter.HandleFunc("/sectors", api.CreateSectorHandler).Methods("POST")
 	authRouter.HandleFunc("/sectors/{id}", api.UpdateSectorHandler).Methods("PUT")
 	authRouter.HandleFunc("/sectors/{id}", api.DeleteSectorHandler).Methods("DELETE")
+	authRouter.HandleFunc("/dashboard/data", api.GetDashboardDataHandler).Methods("GET")
+	authRouter.HandleFunc("/ia/chat", api.IAChatHandler).Methods("POST")
 	authRouter.HandleFunc("/ia/analysis", api.ReportIAHandler).Methods("GET")
 	authRouter.HandleFunc("/machine/asset", api.UpdateMachineAssetHandler).Methods("PUT")
 	authRouter.HandleFunc("/report/ia", api.ReportIAHandler).Methods("POST")
 	authRouter.HandleFunc("/machine/delete", api.DeleteMachineHandler).Methods("DELETE")
+	// 2FA TOTP
+	authRouter.HandleFunc("/auth/2fa/setup", api.SetupTOTPHandler).Methods("GET")
+	authRouter.HandleFunc("/auth/2fa/confirm", api.ConfirmTOTPHandler).Methods("POST")
+	authRouter.HandleFunc("/auth/2fa/disable", api.DisableTOTPHandler).Methods("POST")
+	authRouter.HandleFunc("/auth/2fa/status", api.TOTPStatusHandler).Methods("GET")
+
+	// ─── Admin: Import Jobs ("Download Longo") ────────────────────────────────
+	// All routes require JWT. Factory is inferred from the authenticated user.
+	authRouter.HandleFunc("/admin/import-jobs", api.ListImportJobsHandler).Methods("GET")
+	authRouter.HandleFunc("/admin/import-jobs", api.CreateImportJobHandler).Methods("POST")
+	authRouter.HandleFunc("/admin/import-jobs/{id}", api.GetImportJobHandler).Methods("GET")
+	authRouter.HandleFunc("/admin/import-jobs/{id}/cancel", api.CancelImportJobHandler).Methods("POST")
+	authRouter.HandleFunc("/admin/import-jobs/{id}/retry", api.RetryImportJobHandler).Methods("POST")
 
 	// Rotas com autenticação via API Key (não usam JWT middleware)
 	router.HandleFunc("/api/dashboard", api.GetDashboardHandler).Methods("GET")

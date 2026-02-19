@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -14,10 +15,21 @@ import (
 var jwtSecret []byte
 
 func InitAuth() {
-	jwtSecret = []byte(os.Getenv("JWT_SECRET"))
-	if len(jwtSecret) == 0 {
-		jwtSecret = []byte("super-secret-key-for-local-dev")
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		// Em produção (DATABASE_URL definida = Cloud Run), recusar o default inseguro.
+		// Em desenvolvimento local (sem DATABASE_URL), aceitar o default para facilitar setup.
+		if os.Getenv("DATABASE_URL") != "" {
+			// Produção detectada — sem JWT_SECRET é fatal.
+			panic("FATAL: JWT_SECRET não definida em produção. Configure a variável de ambiente JWT_SECRET no Cloud Run.")
+		}
+		secret = "super-secret-key-for-local-dev"
+		log.Printf("⚠️  JWT_SECRET não definida — usando valor default APENAS para desenvolvimento local. NUNCA use isso em produção.")
 	}
+	if len(secret) < 32 {
+		log.Printf("⚠️  JWT_SECRET parece curta (%d chars). Recomendado: 64+ chars hex aleatórios.", len(secret))
+	}
+	jwtSecret = []byte(secret)
 }
 
 type User struct {
@@ -110,6 +122,27 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": tokenStr})
+}
+
+// UserFromRequest extracts the authenticated User from the request context.
+// Returns nil if the user is not authenticated or the user ID is not set.
+// Used by rbac.go middleware.
+func UserFromRequest(r *http.Request) *User {
+	userID, ok := r.Context().Value("userID").(int64)
+	if !ok || userID == 0 {
+		return nil
+	}
+	db := GetDB()
+	if db == nil {
+		return nil
+	}
+	user := &User{}
+	err := db.QueryRow("SELECT id, email, password_hash FROM users WHERE id = $1", userID).
+		Scan(&user.ID, &user.Email, &user.PasswordHash)
+	if err != nil {
+		return nil
+	}
+	return user
 }
 
 func GetUserByEmail(email string) (*User, error) {
