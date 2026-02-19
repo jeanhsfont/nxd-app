@@ -37,9 +37,10 @@ import (
 )
 
 const (
-	workerPollInterval = 5 * time.Second  // how often to look for pending jobs
-	workerBatchSize    = 1000             // rows per DB transaction (overridden by job.batch_size)
-	workerMaxRuntime   = 6 * time.Hour    // hard timeout per job
+	workerPollInterval  = 5 * time.Second  // how often to look for pending jobs
+	workerBatchSize     = 1000             // rows per DB transaction (overridden by job.batch_size)
+	workerMaxRuntime    = 6 * time.Hour    // hard timeout per job
+	workerBatchThrottle = 50 * time.Millisecond // P5: sleep between batches to not starve real-time ingest
 )
 
 // ImportJob mirrors the nxd.import_jobs row we need for processing.
@@ -79,9 +80,34 @@ func SubmitMemoryJob(jobID uuid.UUID, rows []BulkTelemetryRow) error {
 
 // ─── Worker lifecycle ─────────────────────────────────────────────────────────
 
+// RecoverStaleJobs resets jobs stuck in 'running' state after a restart.
+// Cloud Run instances are stateless — if the instance is killed mid-job,
+// the job remains 'running' forever. We detect these on startup and reset
+// them to 'pending' so they are retried automatically.
+// Only jobs that have been 'running' for more than staleCutoff are reset.
+func RecoverStaleJobs(db *sql.DB) {
+	const staleCutoff = 10 * time.Minute
+	res, err := db.Exec(`
+		UPDATE nxd.import_jobs
+		SET status = 'pending', error_message = 'Worker restarted (auto-recovery)',
+		    rows_done = 0, started_at = NULL, updated_at = NOW()
+		WHERE status = 'running'
+		  AND updated_at < NOW() - $1::interval
+	`, staleCutoff.String())
+	if err != nil {
+		log.Printf("⚠️  [ImportWorker] RecoverStaleJobs error: %v", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("🔁 [ImportWorker] Recovered %d stale running job(s) → pending", n)
+	}
+}
+
 // RunImportWorker starts the background job processor.  Call once from main()
 // after the DB is initialized.  ctx should be cancelled on server shutdown.
 func RunImportWorker(ctx context.Context, db *sql.DB) {
+	// Recover stale jobs from previous instance before polling.
+	RecoverStaleJobs(db)
 	log.Println("✓ [ImportWorker] Background import worker started (poll interval: 5s)")
 	ticker := time.NewTicker(workerPollInterval)
 	defer ticker.Stop()
@@ -217,6 +243,33 @@ func processMemoryJob(ctx context.Context, db *sql.DB, jobID uuid.UUID, rows []B
 		batch := rows[offset:end]
 
 		batchStart := time.Now()
+
+		// P4 — Idempotency: range check before inserting.
+		// Strategy: RANGE CHECK per batch.
+		// We check whether any rows already exist for this asset over the time
+		// range of the current batch. If rows exist, we skip the batch and log
+		// a warning. This prevents double-import if the same job is retried.
+		//
+		// Trade-off: if only SOME rows in the range exist (partial previous run),
+		// the entire batch is skipped. This is intentional — partial inserts
+		// from a crashed job are indistinguishable from legitimate data.
+		// Full re-import requires cancelling the previous job and using a fresh
+		// asset or a different time range.
+		if len(batch) > 0 && batch[0].AssetID != (uuid.UUID{}) {
+			existing, checkErr := countRangeRows(db, batch[0].AssetID, batch[0].Ts, batch[len(batch)-1].Ts)
+			if checkErr != nil {
+				log.Printf("⚠️  [Job %s] range check error (skipping idempotency): %v", jobID, checkErr)
+			} else if existing > 0 {
+				log.Printf("⚠️  [Job %s] batch %d/%d — SKIPPED (idempotent): %d rows already exist for ts [%s — %s]",
+					jobID, offset/batchSize+1, (len(rows)+batchSize-1)/batchSize,
+					existing, batch[0].Ts.Format(time.RFC3339), batch[len(batch)-1].Ts.Format(time.RFC3339))
+				rowsDone += int64(len(batch)) // count as "done" even if skipped
+				updateJobProgress(db, jobID, rowsDone)
+				time.Sleep(workerBatchThrottle) // P5: throttle even on skip
+				continue
+			}
+		}
+
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
 			markJobFailed(db, jobID, fmt.Errorf("begin tx at offset %d: %w", offset, err))
@@ -243,6 +296,10 @@ func processMemoryJob(ctx context.Context, db *sql.DB, jobID uuid.UUID, rows []B
 
 		// Update progress.
 		updateJobProgress(db, jobID, rowsDone)
+
+		// P5: throttle between batches to avoid starving real-time ingest.
+		// 50ms sleep gives real-time requests priority on the DB connection pool.
+		time.Sleep(workerBatchThrottle)
 	}
 
 	totalElapsed := time.Since(start)
@@ -305,6 +362,19 @@ func markJobCancelled(db *sql.DB, jobID uuid.UUID, rowsDone int64) {
 	if err != nil {
 		log.Printf("⚠️  [ImportWorker] Failed to mark job %s cancelled: %v", jobID, err)
 	}
+}
+
+// countRangeRows counts existing telemetry_log rows for an asset in [tsStart, tsEnd].
+// Used for idempotency check before inserting a historical batch.
+// Returns 0 if no rows exist (safe to insert), >0 if data already present (skip).
+func countRangeRows(db *sql.DB, assetID uuid.UUID, tsStart, tsEnd time.Time) (int64, error) {
+	var n int64
+	err := db.QueryRow(`
+		SELECT COUNT(*) FROM nxd.telemetry_log
+		WHERE asset_id = $1 AND ts >= $2 AND ts <= $3
+		LIMIT 1
+	`, assetID, tsStart, tsEnd).Scan(&n)
+	return n, err
 }
 
 // isCancelled checks whether a job has been set to status='cancelled' by the admin.
