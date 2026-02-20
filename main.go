@@ -18,9 +18,18 @@ import (
 	"github.com/rs/cors"
 )
 
+// BuildVersion is set at compile time via -ldflags="-X main.BuildVersion=..."
+// by cloudbuild.yaml using the Cloud Build $BUILD_ID variable.
+// This ensures each deployed revision has a unique, traceable version string.
+var BuildVersion = "dev"
+
 func main() {
 	log.SetOutput(os.Stdout)
-	log.Println("Application entrypoint reached. Starting server...")
+	log.Printf("Application entrypoint reached. Build: %s", BuildVersion)
+	// Expose build version to handlers via env var (overrides any injected env)
+	if BuildVersion != "dev" {
+		os.Setenv("BUILD_VERSION", BuildVersion)
+	}
 	api.InitAuth() // Carrega o segredo JWT
 	config.Load()
 	log.Println("🚀 Iniciando NXD (Nexus Data Exchange)...")
@@ -100,6 +109,7 @@ func main() {
 	authRouter.HandleFunc("/admin/import-jobs/{id}", api.GetImportJobHandler).Methods("GET")
 	authRouter.HandleFunc("/admin/import-jobs/{id}/cancel", api.CancelImportJobHandler).Methods("POST")
 	authRouter.HandleFunc("/admin/import-jobs/{id}/retry", api.RetryImportJobHandler).Methods("POST")
+	authRouter.HandleFunc("/admin/import-jobs/{id}/data", api.SubmitImportJobDataHandler).Methods("POST")
 
 	// Rotas com autenticação via API Key (não usam JWT middleware)
 	router.HandleFunc("/api/dashboard", api.GetDashboardHandler).Methods("GET")

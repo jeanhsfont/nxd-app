@@ -9,11 +9,16 @@ RUN npm run build
 # Stage 2: Build Backend (Go)
 FROM golang:1.24-bullseye AS builder-backend
 WORKDIR /app/backend
+# BUILD_VERSION is injected by cloudbuild.yaml via --build-arg BUILD_VERSION=$BUILD_ID
+# This prevents stale version strings and ensures each build is uniquely identified.
+ARG BUILD_VERSION=dev
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev sqlite3 libsqlite3-dev && rm -rf /var/lib/apt/lists/*
-RUN CGO_ENABLED=1 GOOS=linux go build -o nxd-server main.go
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags="-X main.BuildVersion=${BUILD_VERSION}" \
+    -o nxd-server main.go
 
 # Stage 3: Runtime
 FROM debian:bullseye-slim

@@ -1,37 +1,48 @@
 steps:
   # 1. Construir a imagem unificada (Frontend React + Backend Go)
+  #    Usamos $BUILD_ID como tag imutável — cada build tem sua própria imagem.
+  #    Isso previne que builds concorrentes sobrescrevam a tag 'latest' e
+  #    causem o Cloud Run de fazer deploy de uma versão errada.
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-f'
       - 'Dockerfile.nxd-unified'
       - '-t'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:$BUILD_ID'
+      - '-t'
       - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+      - '--build-arg'
+      - 'BUILD_VERSION=$BUILD_ID'
       - '.'
 
-  # 2. Enviar a imagem para o Artifact Registry
+  # 2. Enviar a imagem para o Artifact Registry (ambas as tags)
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+      - '--all-tags'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend'
 
-  # 3. Implantar no Cloud Run com Cloud SQL + Secrets + Vertex AI
+  # 3. Implantar no Cloud Run usando a tag BUILD_ID imutável
+  #    Isso garante que o Cloud Run sempre faça deploy DESTA build específica,
+  #    independente de outras builds que possam estar rodando em paralelo.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
       - 'run'
       - 'deploy'
       - 'hubsystem-backend'
-      - '--image=us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+      - '--image=us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:$BUILD_ID'
       - '--platform=managed'
       - '--region=us-central1'
       - '--allow-unauthenticated'
       - '--service-account=925156909645-compute@developer.gserviceaccount.com'
       - '--add-cloudsql-instances=slideflow-prod:us-central1:nxd-sql-instance'
       - '--set-secrets=DATABASE_URL=NXD_DATABASE_URL:latest,JWT_SECRET=JWT_SECRET_NXD:latest'
-      - '--set-env-vars=NXD_IA_PROVIDER=vertex,VERTEX_AI_PROJECT=slideflow-prod,VERTEX_AI_LOCATION=us-central1'
+      - '--set-env-vars=NXD_IA_PROVIDER=vertex,VERTEX_AI_PROJECT=slideflow-prod,VERTEX_AI_LOCATION=us-central1,BUILD_VERSION=$BUILD_ID'
       - '--min-instances=1'
       - '--max-instances=20'
 
 images:
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:$BUILD_ID'
   - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
