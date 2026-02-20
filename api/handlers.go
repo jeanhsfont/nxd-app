@@ -404,16 +404,61 @@ func GetFactoryDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		userID,
 	).Scan(&name, &cnpj, &address, &apiKeyHash)
 	if err != nil {
-		http.Error(w, "Nenhuma fábrica encontrada", http.StatusNotFound)
-		return
+		// Fábrica legada não encontrada — tenta buscar na NXD diretamente
+		if nxdDB := store.NXDDB(); nxdDB != nil {
+			var email string
+			db.QueryRow("SELECT email FROM users WHERE id = $1", userID).Scan(&email)
+			if email != "" {
+				nxdDB.QueryRow(`
+					SELECT f.name FROM nxd.factories f
+					JOIN nxd.users u ON u.id = f.user_id
+					WHERE u.email = $1 LIMIT 1
+				`, email).Scan(&name)
+			}
+		}
+	}
+
+	// Se nome ainda está vazio, tenta buscar na nxd.factories via email
+	if name == "" {
+		if nxdDB := store.NXDDB(); nxdDB != nil {
+			var email string
+			db.QueryRow("SELECT email FROM users WHERE id = $1", userID).Scan(&email)
+			if email != "" {
+				nxdDB.QueryRow(`
+					SELECT f.name FROM nxd.factories f
+					JOIN nxd.users u ON u.id = f.user_id
+					WHERE u.email = $1 LIMIT 1
+				`, email).Scan(&name)
+			}
+		}
+	}
+
+	// Verifica se há api_key na NXD (mais confiável do que o legado)
+	hasAPIKey := apiKeyHash != nil && *apiKeyHash != ""
+	if !hasAPIKey {
+		if nxdDB := store.NXDDB(); nxdDB != nil {
+			var email string
+			db.QueryRow("SELECT email FROM users WHERE id = $1", userID).Scan(&email)
+			if email != "" {
+				var nxdAPIKey sql.NullString
+				nxdDB.QueryRow(`
+					SELECT f.api_key FROM nxd.factories f
+					JOIN nxd.users u ON u.id = f.user_id
+					WHERE u.email = $1 LIMIT 1
+				`, email).Scan(&nxdAPIKey)
+				if nxdAPIKey.Valid && nxdAPIKey.String != "" {
+					hasAPIKey = true
+				}
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"name":         name,
-		"cnpj":         cnpj,
-		"address":      address,
-		"has_api_key":  apiKeyHash != nil && *apiKeyHash != "",
+		"name":        name,
+		"cnpj":        cnpj,
+		"address":     address,
+		"has_api_key": hasAPIKey,
 	})
 }
 
@@ -628,7 +673,8 @@ func DeleteSectorHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateMachineAssetHandler — PUT /api/machine/asset
-// Atualiza o group_id (setor) de um asset no banco NXD
+// Atualiza display_name, description e/ou group_id (setor) de um asset no banco NXD.
+// Aceita tanto "sector_id" quanto "group_id" para compatibilidade com o frontend.
 func UpdateMachineAssetHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value("userID").(int64)
 	if !ok {
@@ -637,12 +683,19 @@ func UpdateMachineAssetHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		MachineID string `json:"machine_id"`
-		SectorID  string `json:"sector_id"` // UUID string ou "" para remover do setor
+		MachineID   string `json:"machine_id"`
+		SectorID    string `json:"sector_id"`    // UUID string ou "" para remover do setor
+		GroupID     string `json:"group_id"`     // alias para sector_id
+		DisplayName string `json:"display_name"` // nome exibido no dashboard
+		Description string `json:"description"`  // descrição do ativo
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MachineID == "" {
 		http.Error(w, "machine_id obrigatório", http.StatusBadRequest)
 		return
+	}
+	// Normaliza: group_id tem precedência sobre sector_id se ambos forem enviados
+	if req.GroupID != "" && req.SectorID == "" {
+		req.SectorID = req.GroupID
 	}
 
 	factoryID, err := getFactoryIDForUser(userID)
@@ -665,31 +718,173 @@ func UpdateMachineAssetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Se sector_id for vazio ou "0", remove do setor (NULL)
+	// Constrói UPDATE dinâmico apenas para os campos preenchidos
+	setClauses := []string{}
+	args := []interface{}{}
+	argIdx := 1
+
+	if req.DisplayName != "" {
+		setClauses = append(setClauses, fmt.Sprintf("display_name = $%d", argIdx))
+		args = append(args, req.DisplayName)
+		argIdx++
+	}
+	if req.Description != "" {
+		setClauses = append(setClauses, fmt.Sprintf("description = $%d", argIdx))
+		args = append(args, req.Description)
+		argIdx++
+	}
+
+	// Setor: "" ou "0" = remover (NULL), UUID válido = atribuir
 	if req.SectorID == "" || req.SectorID == "0" {
-		_, err = nxdDB.Exec(`UPDATE nxd.assets SET group_id = NULL WHERE id = $1`, req.MachineID)
+		setClauses = append(setClauses, fmt.Sprintf("group_id = $%d", argIdx))
+		args = append(args, nil)
+		argIdx++
 	} else {
 		sectorUUID, parseErr := uuid.Parse(req.SectorID)
 		if parseErr != nil {
 			http.Error(w, "sector_id inválido", http.StatusBadRequest)
 			return
 		}
-		_, err = nxdDB.Exec(`UPDATE nxd.assets SET group_id = $1 WHERE id = $2`, sectorUUID, req.MachineID)
+		setClauses = append(setClauses, fmt.Sprintf("group_id = $%d", argIdx))
+		args = append(args, sectorUUID)
+		argIdx++
 	}
-	if err != nil {
-		log.Printf("[UpdateMachineAsset] Erro ao atualizar group_id: %v", err)
-		http.Error(w, "Erro ao atualizar setor do ativo", http.StatusInternalServerError)
+
+	if len(setClauses) == 0 {
+		http.Error(w, "Nenhum campo para atualizar", http.StatusBadRequest)
+		return
+	}
+
+	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", argIdx))
+	args = append(args, time.Now())
+	argIdx++
+
+	query := fmt.Sprintf("UPDATE nxd.assets SET %s WHERE id = $%d AND factory_id = $%d",
+		strings.Join(setClauses, ", "), argIdx, argIdx+1)
+	args = append(args, req.MachineID, factoryID)
+
+	if _, err = nxdDB.Exec(query, args...); err != nil {
+		log.Printf("[UpdateMachineAsset] Erro ao atualizar asset: %v", err)
+		http.Error(w, "Erro ao atualizar ativo", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":    true,
-		"machine_id": req.MachineID,
-		"sector_id":  req.SectorID,
+		"success":      true,
+		"machine_id":   req.MachineID,
+		"sector_id":    req.SectorID,
+		"display_name": req.DisplayName,
+		"description":  req.Description,
 	})
 }
-func GetDashboardHandler(w http.ResponseWriter, r *http.Request) {}
+// GetDashboardHandler — GET /api/dashboard?api_key=XXX
+// Dashboard via API key (para o DX / dispositivos externos sem JWT).
+// Retorna resumo da fábrica: ativos, status online/offline, últimas métricas.
+func GetDashboardHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		http.Error(w, "api_key obrigatório", http.StatusUnauthorized)
+		return
+	}
+
+	nxdDB := store.NXDDB()
+	if nxdDB == nil {
+		http.Error(w, "Banco NXD não disponível", http.StatusInternalServerError)
+		return
+	}
+
+	factory, err := store.GetFactoryByAPIKey(nxdDB, apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "API key inválida", http.StatusUnauthorized)
+		return
+	}
+
+	factoryUUID, _ := uuid.Parse(factory.ID)
+
+	// Busca assets com últimas métricas
+	rows, err := nxdDB.Query(`
+		SELECT a.id, a.display_name, a.source_tag_id, a.group_id,
+		       MAX(tl.ts) as last_seen,
+		       json_object_agg(tl.metric_key, tl.metric_value) FILTER (WHERE tl.metric_key IS NOT NULL) as metrics
+		FROM nxd.assets a
+		LEFT JOIN LATERAL (
+			SELECT DISTINCT ON (metric_key) metric_key, metric_value, ts
+			FROM nxd.telemetry_log
+			WHERE asset_id = a.id
+			ORDER BY metric_key, ts DESC
+		) tl ON true
+		WHERE a.factory_id = $1
+		GROUP BY a.id, a.display_name, a.source_tag_id, a.group_id
+		ORDER BY a.display_name
+	`, factoryUUID)
+	if err != nil {
+		log.Printf("[GetDashboardHandler] Erro ao buscar assets: %v", err)
+		http.Error(w, "Erro ao buscar dados", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type AssetEntry struct {
+		ID          string                 `json:"id"`
+		DisplayName string                 `json:"display_name"`
+		SourceTagID string                 `json:"source_tag_id"`
+		GroupID     *string                `json:"group_id"`
+		LastSeen    *time.Time             `json:"last_seen"`
+		IsOnline    bool                   `json:"is_online"`
+		Metrics     map[string]interface{} `json:"metrics"`
+	}
+
+	var assets []AssetEntry
+	onlineCount := 0
+	now := time.Now()
+	var lastUpdate *time.Time
+
+	for rows.Next() {
+		var a AssetEntry
+		var groupID sql.NullString
+		var lastSeen sql.NullTime
+		var metricsJSON []byte
+		if err := rows.Scan(&a.ID, &a.DisplayName, &a.SourceTagID, &groupID, &lastSeen, &metricsJSON); err != nil {
+			continue
+		}
+		if groupID.Valid && groupID.String != "" {
+			a.GroupID = &groupID.String
+		}
+		if lastSeen.Valid {
+			a.LastSeen = &lastSeen.Time
+			a.IsOnline = now.Sub(lastSeen.Time) < 60*time.Second
+			if lastUpdate == nil || lastSeen.Time.After(*lastUpdate) {
+				t := lastSeen.Time
+				lastUpdate = &t
+			}
+		}
+		if a.IsOnline {
+			onlineCount++
+		}
+		if len(metricsJSON) > 0 {
+			json.Unmarshal(metricsJSON, &a.Metrics)
+		}
+		if a.Metrics == nil {
+			a.Metrics = map[string]interface{}{}
+		}
+		assets = append(assets, a)
+	}
+
+	if assets == nil {
+		assets = []AssetEntry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory_name":  factory.Name,
+		"factory_id":    factory.ID,
+		"assets":        assets,
+		"total_assets":  len(assets),
+		"online_assets": onlineCount,
+		"last_update":   lastUpdate,
+	})
+}
 
 // GetDashboardDataHandler retorna os dados reais de telemetria para o dashboard (autenticado)
 func GetDashboardDataHandler(w http.ResponseWriter, r *http.Request) {
@@ -860,9 +1055,32 @@ func GetDashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write(payload)
 }
 
+// DashboardSummaryHandler — GET /api/dashboard/summary?api_key=XXX
+// Retorna resumo compacto da fábrica via API key (sem JWT).
+// Nota: a rota está registrada fora do authRouter, por isso não usa JWT.
 func DashboardSummaryHandler(w http.ResponseWriter, r *http.Request) {
-	// Alias para GetDashboardDataHandler (rota legada sem JWT)
-	GetDashboardDataHandler(w, r)
+	// Tenta autenticar via API key (rota não-JWT)
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey != "" {
+		GetDashboardHandler(w, r)
+		return
+	}
+	// Fallback: sem api_key, retorna resumo básico do sistema
+	nxdDB := store.NXDDB()
+	var totalAssets, onlineAssets int
+	if nxdDB != nil {
+		nxdDB.QueryRow(`SELECT COUNT(*) FROM nxd.assets`).Scan(&totalAssets)
+		nxdDB.QueryRow(`
+			SELECT COUNT(DISTINCT asset_id) FROM nxd.telemetry_log
+			WHERE ts >= NOW() - INTERVAL '60 seconds'
+		`).Scan(&onlineAssets)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_assets":  totalAssets,
+		"online_assets": onlineAssets,
+		"timestamp":     time.Now().Format(time.RFC3339),
+	})
 }
 
 // ReportIAHandler — POST /api/report/ia  or  GET /api/ia/analysis
@@ -930,10 +1148,342 @@ Use formatação Markdown. Seja objetivo e técnico. Responda em português bras
 		"analysis":           analysis,
 	})
 }
-func AnalyticsHandler(w http.ResponseWriter, r *http.Request)      {}
-func DeleteMachineHandler(w http.ResponseWriter, r *http.Request)  {}
-func HealthStatusHandler(w http.ResponseWriter, r *http.Request)   {}
-func ConnectionLogsHandler(w http.ResponseWriter, r *http.Request) {}
+// AnalyticsHandler — GET /api/analytics?api_key=XXX
+// Retorna métricas agregadas por ativo: min, max, avg, contagem de leituras.
+// Suporta parâmetro opcional: period=<minutes> (padrão: 60).
+func AnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		http.Error(w, "api_key obrigatório", http.StatusUnauthorized)
+		return
+	}
+
+	nxdDB := store.NXDDB()
+	if nxdDB == nil {
+		http.Error(w, "Banco NXD não disponível", http.StatusInternalServerError)
+		return
+	}
+
+	factory, err := store.GetFactoryByAPIKey(nxdDB, apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "API key inválida", http.StatusUnauthorized)
+		return
+	}
+	factoryUUID, _ := uuid.Parse(factory.ID)
+
+	// Período de análise — padrão 60 min
+	periodMinutes := 60
+	if p := r.URL.Query().Get("period"); p != "" {
+		if v, err := fmt.Sscanf(p, "%d", &periodMinutes); v != 1 || err != nil || periodMinutes < 1 {
+			periodMinutes = 60
+		}
+	}
+
+	rows, err := nxdDB.Query(`
+		SELECT
+			a.id,
+			a.display_name,
+			a.source_tag_id,
+			tl.metric_key,
+			MIN(tl.metric_value) as min_val,
+			MAX(tl.metric_value) as max_val,
+			AVG(tl.metric_value) as avg_val,
+			COUNT(*) as samples,
+			MAX(tl.ts) as last_ts
+		FROM nxd.telemetry_log tl
+		JOIN nxd.assets a ON a.id = tl.asset_id
+		WHERE tl.factory_id = $1
+		  AND tl.ts >= NOW() - ($2 || ' minutes')::INTERVAL
+		GROUP BY a.id, a.display_name, a.source_tag_id, tl.metric_key
+		ORDER BY a.display_name, tl.metric_key
+	`, factoryUUID, periodMinutes)
+	if err != nil {
+		log.Printf("[Analytics] Erro ao buscar métricas: %v", err)
+		http.Error(w, "Erro ao buscar analytics", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type MetricSummary struct {
+		MetricKey string    `json:"metric_key"`
+		Min       float64   `json:"min"`
+		Max       float64   `json:"max"`
+		Avg       float64   `json:"avg"`
+		Samples   int       `json:"samples"`
+		LastTs    time.Time `json:"last_ts"`
+	}
+	type AssetAnalytics struct {
+		AssetID     string          `json:"asset_id"`
+		DisplayName string          `json:"display_name"`
+		SourceTagID string          `json:"source_tag_id"`
+		Metrics     []MetricSummary `json:"metrics"`
+	}
+
+	assetMap := map[string]*AssetAnalytics{}
+	assetOrder := []string{}
+
+	for rows.Next() {
+		var assetID, displayName, sourceTagID, metricKey string
+		var minVal, maxVal, avgVal float64
+		var samples int
+		var lastTs time.Time
+		if err := rows.Scan(&assetID, &displayName, &sourceTagID, &metricKey, &minVal, &maxVal, &avgVal, &samples, &lastTs); err != nil {
+			continue
+		}
+		if _, exists := assetMap[assetID]; !exists {
+			assetMap[assetID] = &AssetAnalytics{
+				AssetID:     assetID,
+				DisplayName: displayName,
+				SourceTagID: sourceTagID,
+				Metrics:     []MetricSummary{},
+			}
+			assetOrder = append(assetOrder, assetID)
+		}
+		assetMap[assetID].Metrics = append(assetMap[assetID].Metrics, MetricSummary{
+			MetricKey: metricKey,
+			Min:       minVal,
+			Max:       maxVal,
+			Avg:       avgVal,
+			Samples:   samples,
+			LastTs:    lastTs,
+		})
+	}
+
+	result := make([]*AssetAnalytics, 0, len(assetOrder))
+	for _, id := range assetOrder {
+		result = append(result, assetMap[id])
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory_id":     factory.ID,
+		"period_minutes": periodMinutes,
+		"assets":         result,
+		"generated_at":   time.Now().Format(time.RFC3339),
+	})
+}
+
+// DeleteMachineHandler — DELETE /api/machine/delete
+// Remove um asset (máquina) da fábrica do usuário autenticado.
+// Requer JWT. Body: {"machine_id":"<uuid>"}
+func DeleteMachineHandler(w http.ResponseWriter, r *http.Request) {
+	userID, ok := r.Context().Value("userID").(int64)
+	if !ok {
+		http.Error(w, "Não autenticado", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		MachineID string `json:"machine_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.MachineID == "" {
+		http.Error(w, "machine_id obrigatório", http.StatusBadRequest)
+		return
+	}
+
+	factoryID, err := getFactoryIDForUser(userID)
+	if err != nil {
+		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		return
+	}
+
+	nxdDB := store.NXDDB()
+	if nxdDB == nil {
+		http.Error(w, "Banco NXD não disponível", http.StatusInternalServerError)
+		return
+	}
+
+	res, err := nxdDB.Exec(`DELETE FROM nxd.assets WHERE id = $1 AND factory_id = $2`, req.MachineID, factoryID)
+	if err != nil {
+		log.Printf("[DeleteMachine] Erro: %v", err)
+		http.Error(w, "Erro ao deletar ativo", http.StatusInternalServerError)
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		http.Error(w, "Ativo não encontrado ou não autorizado", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"machine_id": req.MachineID,
+		"message":    "Ativo removido com sucesso",
+	})
+}
+
+// HealthStatusHandler — GET /api/connection/status?api_key=XXX
+// Retorna status de conexão de cada ativo da fábrica (online/offline).
+// Um ativo é considerado ONLINE se enviou dados nos últimos 60 segundos.
+func HealthStatusHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		http.Error(w, "api_key obrigatório", http.StatusUnauthorized)
+		return
+	}
+
+	nxdDB := store.NXDDB()
+	if nxdDB == nil {
+		http.Error(w, "Banco NXD não disponível", http.StatusInternalServerError)
+		return
+	}
+
+	factory, err := store.GetFactoryByAPIKey(nxdDB, apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "API key inválida", http.StatusUnauthorized)
+		return
+	}
+	factoryUUID, _ := uuid.Parse(factory.ID)
+
+	rows, err := nxdDB.Query(`
+		SELECT
+			a.id,
+			a.display_name,
+			a.source_tag_id,
+			MAX(tl.ts) as last_seen
+		FROM nxd.assets a
+		LEFT JOIN nxd.telemetry_log tl ON tl.asset_id = a.id
+		WHERE a.factory_id = $1
+		GROUP BY a.id, a.display_name, a.source_tag_id
+		ORDER BY a.display_name
+	`, factoryUUID)
+	if err != nil {
+		log.Printf("[HealthStatus] Erro: %v", err)
+		http.Error(w, "Erro ao buscar status", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type AssetStatus struct {
+		AssetID     string     `json:"asset_id"`
+		DisplayName string     `json:"display_name"`
+		SourceTagID string     `json:"source_tag_id"`
+		IsOnline    bool       `json:"is_online"`
+		LastSeen    *time.Time `json:"last_seen"`
+		Status      string     `json:"status"`
+	}
+
+	var assets []AssetStatus
+	onlineCount := 0
+	now := time.Now()
+
+	for rows.Next() {
+		var a AssetStatus
+		var lastSeen sql.NullTime
+		if err := rows.Scan(&a.AssetID, &a.DisplayName, &a.SourceTagID, &lastSeen); err != nil {
+			continue
+		}
+		if lastSeen.Valid {
+			a.LastSeen = &lastSeen.Time
+			a.IsOnline = now.Sub(lastSeen.Time) < 60*time.Second
+		}
+		if a.IsOnline {
+			a.Status = "online"
+			onlineCount++
+		} else {
+			a.Status = "offline"
+		}
+		assets = append(assets, a)
+	}
+
+	if assets == nil {
+		assets = []AssetStatus{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory_id":    factory.ID,
+		"factory_name":  factory.Name,
+		"assets":        assets,
+		"total_assets":  len(assets),
+		"online_assets": onlineCount,
+		"offline_assets": len(assets) - onlineCount,
+		"timestamp":     time.Now().Format(time.RFC3339),
+	})
+}
+
+// ConnectionLogsHandler — GET /api/connection/logs?api_key=XXX
+// Retorna logs de auditoria/conexão da fábrica (ingest, erros, etc.).
+// Suporta parâmetros: limit=<int> (padrão: 50), level=error|all
+func ConnectionLogsHandler(w http.ResponseWriter, r *http.Request) {
+	apiKey := r.URL.Query().Get("api_key")
+	if apiKey == "" {
+		http.Error(w, "api_key obrigatório", http.StatusUnauthorized)
+		return
+	}
+
+	nxdDB := store.NXDDB()
+	if nxdDB == nil {
+		http.Error(w, "Banco NXD não disponível", http.StatusInternalServerError)
+		return
+	}
+
+	factory, err := store.GetFactoryByAPIKey(nxdDB, apiKey)
+	if err != nil || factory == nil {
+		http.Error(w, "API key inválida", http.StatusUnauthorized)
+		return
+	}
+	factoryUUID, _ := uuid.Parse(factory.ID)
+
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := fmt.Sscanf(l, "%d", &limit); v != 1 || err != nil || limit < 1 || limit > 500 {
+			limit = 50
+		}
+	}
+
+	// Filtro de nível
+	levelFilter := r.URL.Query().Get("level")
+	statusFilter := ""
+	if levelFilter == "error" {
+		statusFilter = " AND status = 'error'"
+	}
+
+	rows, err := nxdDB.Query(fmt.Sprintf(`
+		SELECT ts, action, COALESCE(device_id,''), COALESCE(status,''), COALESCE(message,''), COALESCE(ip_address,'')
+		FROM nxd.audit_log
+		WHERE factory_id = $1%s
+		ORDER BY ts DESC
+		LIMIT $2
+	`, statusFilter), factoryUUID, limit)
+	if err != nil {
+		log.Printf("[ConnectionLogs] Erro: %v", err)
+		http.Error(w, "Erro ao buscar logs", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	type LogEntry struct {
+		Timestamp time.Time `json:"ts"`
+		Action    string    `json:"action"`
+		DeviceID  string    `json:"device_id"`
+		Status    string    `json:"status"`
+		Message   string    `json:"message"`
+		IPAddress string    `json:"ip_address"`
+	}
+
+	var logs []LogEntry
+	for rows.Next() {
+		var e LogEntry
+		if err := rows.Scan(&e.Timestamp, &e.Action, &e.DeviceID, &e.Status, &e.Message, &e.IPAddress); err != nil {
+			continue
+		}
+		logs = append(logs, e)
+	}
+
+	if logs == nil {
+		logs = []LogEntry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"factory_id": factory.ID,
+		"logs":       logs,
+		"count":      len(logs),
+		"limit":      limit,
+	})
+}
 
 // HealthHandler — GET /api/health
 // Retorna status do sistema com conectividade real ao banco.
