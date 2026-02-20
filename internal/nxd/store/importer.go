@@ -146,6 +146,7 @@ func claimAndProcessPending(ctx context.Context, db *sql.DB) error {
 		WHERE id = (
 			SELECT id FROM nxd.import_jobs
 			WHERE status = 'pending'
+			  AND source_type != 'memory'
 			ORDER BY created_at
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED
