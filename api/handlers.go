@@ -475,12 +475,27 @@ func RegenerateAPIKeyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	apiKeyPrefix := ""
+	if len(apiKey) >= 16 {
+		apiKeyPrefix = apiKey[:16]
+	}
+
 	// Atualiza no legado
 	db.Exec("UPDATE factories SET api_key_hash = $1 WHERE user_id = $2", string(apiKeyHash), userID)
 
-	// Também insere/atualiza na nxd.factories (para o IngestHandler)
+	// Atualiza na nxd.factories com api_key, hash e prefix para auth funcionar corretamente
 	if nxdDB := store.NXDDB(); nxdDB != nil {
-		nxdDB.Exec("INSERT INTO nxd.factories (name, api_key_hash) VALUES ('Minha Fábrica', $1)", apiKeyHash)
+		var email string
+		db.QueryRow("SELECT email FROM users WHERE id = $1", userID).Scan(&email)
+		if email != "" {
+			// Busca factory NXD via email e atualiza
+			nxdDB.Exec(`
+				UPDATE nxd.factories f
+				SET api_key_hash = $1, api_key = $2, api_key_prefix = $3, updated_at = NOW()
+				FROM nxd.users u
+				WHERE u.email = $4 AND f.user_id = u.id
+			`, string(apiKeyHash), apiKey, apiKeyPrefix, email)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

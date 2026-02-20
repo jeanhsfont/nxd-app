@@ -102,6 +102,12 @@ func OnboardingHandler(w http.ResponseWriter, r *http.Request) {
 		var email string
 		db.QueryRow("SELECT email FROM users WHERE id = $1", userID).Scan(&email)
 
+		// Calcula o prefixo da api_key para lookup O(1) no IngestHandler
+		apiKeyPrefix := ""
+		if len(apiKey) >= 16 {
+			apiKeyPrefix = apiKey[:16]
+		}
+
 		if email != "" {
 			// Garantir que o nxd.user existe
 			var nxdUserID string
@@ -113,29 +119,29 @@ func OnboardingHandler(w http.ResponseWriter, r *http.Request) {
 				data.PersonalData.FullName, email,
 			).Scan(&nxdUserID)
 			if err == nil && nxdUserID != "" {
-				// Verificar se já existe factory para este user_id
-			var existingFactoryID string
-			nxdDB.QueryRow(`SELECT id FROM nxd.factories WHERE user_id = $1 LIMIT 1`, nxdUserID).Scan(&existingFactoryID)
-			if existingFactoryID != "" {
-				// Atualizar factory existente
-				nxdDB.Exec(`
-					UPDATE nxd.factories SET name = $1, api_key_hash = $2, updated_at = NOW()
-					WHERE id = $3
-				`, data.FactoryData.Name, string(apiKeyHash), existingFactoryID)
-			} else {
-				// Inserir nova factory vinculada ao nxd.user
-				nxdDB.Exec(`
-					INSERT INTO nxd.factories (user_id, name, api_key_hash)
-					VALUES ($1, $2, $3)
-				`, nxdUserID, data.FactoryData.Name, string(apiKeyHash))
-			}
+				var existingFactoryID string
+				nxdDB.QueryRow(`SELECT id FROM nxd.factories WHERE user_id = $1 LIMIT 1`, nxdUserID).Scan(&existingFactoryID)
+				if existingFactoryID != "" {
+					// Atualizar factory existente — salva api_key, hash E prefix para auth funcionar
+					nxdDB.Exec(`
+						UPDATE nxd.factories
+						SET name = $1, api_key_hash = $2, api_key = $3, api_key_prefix = $4, updated_at = NOW()
+						WHERE id = $5
+					`, data.FactoryData.Name, string(apiKeyHash), apiKey, apiKeyPrefix, existingFactoryID)
+				} else {
+					// Inserir nova factory vinculada ao nxd.user
+					nxdDB.Exec(`
+						INSERT INTO nxd.factories (user_id, name, api_key_hash, api_key, api_key_prefix)
+						VALUES ($1, $2, $3, $4, $5)
+					`, nxdUserID, data.FactoryData.Name, string(apiKeyHash), apiKey, apiKeyPrefix)
+				}
 			}
 		} else {
-			// Fallback sem email: insert sem user_id (comportamento anterior)
+			// Fallback sem email: insert sem user_id mas com api_key e prefix
 			nxdDB.Exec(`
-				INSERT INTO nxd.factories (name, api_key_hash)
-				VALUES ($1, $2)
-			`, data.FactoryData.Name, string(apiKeyHash))
+				INSERT INTO nxd.factories (name, api_key_hash, api_key, api_key_prefix)
+				VALUES ($1, $2, $3, $4)
+			`, data.FactoryData.Name, string(apiKeyHash), apiKey, apiKeyPrefix)
 		}
 	}
 
