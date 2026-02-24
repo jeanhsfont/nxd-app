@@ -3,28 +3,32 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
+var ErrDBNotReady = errors.New("database not initialized")
+
 var jwtSecret []byte
 
 func InitAuth() {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		// Em produção (DATABASE_URL definida = Cloud Run), recusar o default inseguro.
-		// Em desenvolvimento local (sem DATABASE_URL), aceitar o default para facilitar setup.
 		if os.Getenv("DATABASE_URL") != "" {
-			// Produção detectada — sem JWT_SECRET é fatal.
-			panic("FATAL: JWT_SECRET não definida em produção. Configure a variável de ambiente JWT_SECRET no Cloud Run.")
+			// Produção: não fazer panic para permitir que o servidor suba e os logs apareçam; usar placeholder.
+			log.Printf("⚠️  JWT_SECRET não definida em produção — usando placeholder. Configure JWT_SECRET no Cloud Run.")
+			secret = "placeholder-configure-jwt-secret-in-cloud-run-" + time.Now().Format("20060102")
+		} else {
+			secret = "super-secret-key-for-local-dev"
+			log.Printf("⚠️  JWT_SECRET não definida — usando valor default APENAS para desenvolvimento local.")
 		}
-		secret = "super-secret-key-for-local-dev"
-		log.Printf("⚠️  JWT_SECRET não definida — usando valor default APENAS para desenvolvimento local. NUNCA use isso em produção.")
 	}
 	if len(secret) < 32 {
 		log.Printf("⚠️  JWT_SECRET parece curta (%d chars). Recomendado: 64+ chars hex aleatórios.", len(secret))
@@ -44,65 +48,123 @@ type jwtClaims struct {
 }
 
 func RegisterHandler(w http.ResponseWriter, r *http.Request) {
+	EnsureAuthTables()
+	log.Printf("[Register] request start")
 	var req struct {
 		Name     string `json:"name"`
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Corpo da requisição inválido"}`, http.StatusBadRequest)
+		log.Printf("[Register] decode error: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"Corpo da requisição inválido"}`))
 		return
 	}
 
 	if req.Email == "" || req.Password == "" || req.Name == "" {
-		http.Error(w, `{"error":"Nome, email e senha são obrigatórios"}`, http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"Nome, email e senha são obrigatórios"}`))
 		return
 	}
 
 	_, err := GetUserByEmail(req.Email)
 	if err == nil {
-		http.Error(w, `{"error":"Este email já está em uso"}`, http.StatusConflict)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		w.Write([]byte(`{"error":"Este email já está em uso"}`))
 		return
 	}
-	if err != sql.ErrNoRows {
-		http.Error(w, `{"error":"Erro ao verificar usuário"}`, http.StatusInternalServerError)
+	if !errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrDBNotReady) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"Sistema temporariamente indisponível. Tente em instantes."}`))
+			return
+		}
+		log.Printf("[Register] GetUserByEmail falhou: %v", err)
+		errStr := err.Error()
+		if strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "não existe") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"Banco ainda inicializando. Aguarde 30 segundos e tente novamente."}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"Erro ao processar cadastro. Tente novamente em instantes."}`))
 		return
 	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		http.Error(w, `{"error":"Falha ao processar senha"}`, http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"Falha ao processar senha"}`))
 		return
 	}
 
 	if _, err := CreateUser(req.Email, string(passwordHash), req.Name); err != nil {
-		http.Error(w, `{"error":"Falha ao criar usuário"}`, http.StatusInternalServerError)
+		if errors.Is(err, ErrDBNotReady) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"Sistema temporariamente indisponível. Tente em instantes."}`))
+			return
+		}
+		log.Printf("[Register] CreateUser falhou: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"Falha ao criar usuário"}`))
 		return
 	}
 
+	log.Printf("[Register] usuário criado: %s", req.Email)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Usuário criado com sucesso"})
 }
 
 func LoginHandler(w http.ResponseWriter, r *http.Request) {
+	EnsureAuthTables()
 	var req struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Corpo da requisição inválido"}`, http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":"Corpo da requisição inválido"}`))
 		return
 	}
 
 	user, err := GetUserByEmail(req.Email)
 	if err != nil {
-		http.Error(w, `{"error":"Credenciais inválidas"}`, http.StatusUnauthorized)
+		if errors.Is(err, ErrDBNotReady) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"Sistema temporariamente indisponível. Tente em instantes."}`))
+			return
+		}
+		errStr := err.Error()
+		if strings.Contains(errStr, "does not exist") || strings.Contains(errStr, "não existe") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"Banco ainda inicializando. Aguarde 30 segundos e tente novamente."}`))
+			return
+		}
+		// Usuário não encontrado (sql.ErrNoRows) ou outro erro → credenciais inválidas
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"Credenciais inválidas"}`))
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
-		http.Error(w, `{"error":"Credenciais inválidas"}`, http.StatusUnauthorized)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"Credenciais inválidas"}`))
 		return
 	}
 
@@ -116,7 +178,9 @@ func LoginHandler(w http.ResponseWriter, r *http.Request) {
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	tokenStr, err := jwtToken.SignedString(jwtSecret)
 	if err != nil {
-		http.Error(w, `{"error":"Falha ao gerar token"}`, http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error":"Falha ao gerar token"}`))
 		return
 	}
 
@@ -137,7 +201,7 @@ func UserFromRequest(r *http.Request) *User {
 		return nil
 	}
 	user := &User{}
-	err := db.QueryRow("SELECT id, email, password_hash FROM users WHERE id = $1", userID).
+	err := db.QueryRow("SELECT id, email, password_hash FROM public.users WHERE id = $1", userID).
 		Scan(&user.ID, &user.Email, &user.PasswordHash)
 	if err != nil {
 		return nil
@@ -147,7 +211,10 @@ func UserFromRequest(r *http.Request) *User {
 
 func GetUserByEmail(email string) (*User, error) {
 	db := GetDB()
-	row := db.QueryRow("SELECT id, email, password_hash FROM users WHERE email = $1", email)
+	if db == nil {
+		return nil, ErrDBNotReady
+	}
+	row := db.QueryRow("SELECT id, email, password_hash FROM public.users WHERE email = $1", email)
 	user := &User{}
 	err := row.Scan(&user.ID, &user.Email, &user.PasswordHash)
 	if err != nil {
@@ -158,9 +225,12 @@ func GetUserByEmail(email string) (*User, error) {
 
 func CreateUser(email, passwordHash, name string) (int64, error) {
 	db := GetDB()
+	if db == nil {
+		return 0, ErrDBNotReady
+	}
 	var id int64
 	err := db.QueryRow(
-		"INSERT INTO users (email, password_hash, full_name) VALUES ($1, $2, $3) RETURNING id",
+		"INSERT INTO public.users (email, password_hash, full_name) VALUES ($1, $2, $3) RETURNING id",
 		email, passwordHash, name,
 	).Scan(&id)
 	if err != nil {

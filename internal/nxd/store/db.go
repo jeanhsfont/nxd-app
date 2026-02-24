@@ -20,19 +20,28 @@ func NXDDB() *sql.DB {
 	return nxdDB
 }
 
+// Driver retorna o driver do banco ("postgres" ou "sqlite3"). Usado para queries que dependem do schema (ex.: nxd.sectors no Postgres).
+func Driver() string {
+	return dbDriver
+}
+
 func InitNXDDB() error {
 	var err error
 	nxdOnce.Do(func() {
+		// Tenta NXD_DATABASE_URL primeiro, depois DATABASE_URL (mesmo Postgres da API legada)
 		connURL := os.Getenv("NXD_DATABASE_URL")
+		if connURL == "" {
+			connURL = os.Getenv("DATABASE_URL")
+		}
 		if connURL != "" {
 			// Modo Produção: PostgreSQL
 			dbDriver = "postgres"
-			log.Println("✓ Usando banco de dados PostgreSQL (produção).")
+			log.Println("✓ NXD store: usando banco de dados PostgreSQL.")
 			nxdDB, err = sql.Open(dbDriver, connURL)
 		} else {
 			// Modo Desenvolvimento: SQLite
 			dbDriver = "sqlite3"
-			log.Println("✓ Usando banco de dados SQLite (desenvolvimento).")
+			log.Println("✓ NXD store: usando banco de dados SQLite (desenvolvimento).")
 			nxdDB, err = sql.Open(dbDriver, "./nxd.db")
 		}
 

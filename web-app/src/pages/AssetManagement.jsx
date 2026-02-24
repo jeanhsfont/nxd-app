@@ -174,13 +174,22 @@ export default function AssetManagement() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [sectorsRes, machinesRes, factoryRes] = await Promise.all([
+        const [sectorsRes, dashboardRes, factoryRes] = await Promise.all([
           api.get('/api/sectors'),
-          api.get('/api/dashboard'), // Usando dashboard para pegar máquinas com status
+          api.get('/api/dashboard/data'),
           api.get('/api/factory/details')
         ]);
-        setSectors(sectorsRes.data.sectors || []);
-        setMachines(machinesRes.data.machines || []);
+        setSectors(Array.isArray(sectorsRes.data) ? sectorsRes.data : (sectorsRes.data.sectors || []));
+        // Mapeia os assets do dashboard para o formato esperado pelo DnD
+        const assets = (dashboardRes.data.assets || []).map(a => ({
+          id: a.id,
+          name: a.display_name,
+          display_name: a.display_name,
+          source_tag_id: a.source_tag_id,
+          status: a.is_online ? 'online' : 'offline',
+          sector_id: a.group_id || null, // group_id vem do backend (UUID string ou null)
+        }));
+        setMachines(assets);
         setFactory(factoryRes.data);
       } catch (error) {
         console.error("Erro ao buscar dados:", error);
@@ -209,10 +218,10 @@ export default function AssetManagement() {
 
     const machineId = active.id;
     const overId = over.id;
-    let newSectorId = null;
+    let newSectorId = undefined;
 
     if (overId === 'sidebar-droppable') {
-      newSectorId = 0; // Ou o valor que sua API espera para "sem setor"
+      newSectorId = null; // Remove do setor
     } else {
       const targetSector = sectors.find(s => s.id === overId);
       if (targetSector) {
@@ -220,18 +229,25 @@ export default function AssetManagement() {
       }
     }
 
-    if (newSectorId !== null) {
+    if (newSectorId !== undefined) {
+      // Snapshot anterior para reverter se necessário
+      const prevMachines = machines;
+
       // Atualiza o estado localmente para feedback imediato
-      setMachines(prev => prev.map(m => 
+      setMachines(prev => prev.map(m =>
         m.id === machineId ? { ...m, sector_id: newSectorId } : m
       ));
-      
-      // Chama a API para persistir a mudança
+
+      // Chama a API para persistir a mudança (PUT /api/machine/asset)
       try {
-        await api.post('/api/machine/asset', { machine_id: machineId, sector_id: newSectorId });
+        await api.put('/api/machine/asset', {
+          machine_id: machineId,
+          sector_id: newSectorId === null ? '' : newSectorId,
+        });
       } catch (error) {
         console.error("Erro ao atualizar setor da máquina:", error);
-        // Reverte o estado se a API falhar (opcional, mas recomendado)
+        // Reverte o estado local se a API falhar
+        setMachines(prevMachines);
       }
     }
   };
@@ -251,8 +267,8 @@ export default function AssetManagement() {
     try {
       await api.delete(`/api/sectors/${id}`); // Assumindo que a API suporta DELETE
       setSectors(prev => prev.filter(s => s.id !== id));
-      setMachines(prev => prev.map(m => 
-        m.sector_id === id ? { ...m, sector_id: 0 } : m
+      setMachines(prev => prev.map(m =>
+        m.sector_id === id ? { ...m, sector_id: null } : m
       ));
     } catch (error) {
       console.error("Erro ao deletar setor:", error);
@@ -270,7 +286,7 @@ export default function AssetManagement() {
     >
       <div className="flex h-[calc(100vh-64px)] bg-gray-100 font-sans overflow-hidden">
         {/* Sidebar */}
-        <Sidebar machines={machines.filter(m => !m.sector_id || m.sector_id === 0)} />
+        <Sidebar machines={machines.filter(m => !m.sector_id)} />
 
         {/* Main Content */}
         <main className="flex-1 p-8 overflow-y-auto">

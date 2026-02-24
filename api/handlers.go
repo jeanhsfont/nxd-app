@@ -266,8 +266,17 @@ func detectType(value interface{}) string {
 	return reflect.TypeOf(value).String()
 }
 
+// CreateFactoryHandler — POST /api/factory/create (rota pública, legado).
+// O fluxo recomendado é: Register → Login → Onboarding (que cria fábrica e gera API key).
 func CreateFactoryHandler(w http.ResponseWriter, r *http.Request) {
-	// Implementação futura se necessário
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"message": "Use o fluxo: Registrar → Login → Onboarding para criar sua fábrica e obter a API Key.",
+		"register": "/api/register",
+		"login":    "/api/login",
+		"onboarding": "POST /api/onboarding (com JWT)",
+	})
 }
 
 // getNXDFactoryForUser busca a fábrica na nxd.factories pelo userID legado (int64)

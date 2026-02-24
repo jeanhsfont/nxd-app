@@ -29,7 +29,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"strings"
 	"time"
 
@@ -219,103 +221,184 @@ func processMemoryJob(ctx context.Context, db *sql.DB, jobID uuid.UUID, rows []B
 	}
 
 	log.Printf("🔄 [ImportWorker] Memory job %s started (%d rows)", jobID, len(rows))
-
-	// Query batch_size for this job.
 	var batchSize int
 	_ = db.QueryRowContext(ctx, `SELECT batch_size FROM nxd.import_jobs WHERE id = $1`, jobID).Scan(&batchSize)
 	if batchSize <= 0 {
 		batchSize = workerBatchSize
 	}
+	return runBatchInsertFromRows(ctx, db, jobID, batchSize, rows)
+}
 
+// runBatchInsertFromRows processa inserção em lotes; usado por memory e dx_http.
+func runBatchInsertFromRows(ctx context.Context, db *sql.DB, jobID uuid.UUID, batchSize int, rows []BulkTelemetryRow) error {
+	if batchSize <= 0 {
+		batchSize = workerBatchSize
+	}
 	var rowsDone int64
 	start := time.Now()
-
 	for offset := 0; offset < len(rows); offset += batchSize {
-		// Check cancellation before each batch.
 		if cancelled, _ := isCancelled(db, jobID); cancelled {
 			markJobCancelled(db, jobID, rowsDone)
 			return nil
 		}
-
 		end := offset + batchSize
 		if end > len(rows) {
 			end = len(rows)
 		}
 		batch := rows[offset:end]
-
 		batchStart := time.Now()
-
-		// P4 — Idempotency: range check before inserting.
-		// Strategy: RANGE CHECK per batch.
-		// We check whether any rows already exist for this asset over the time
-		// range of the current batch. If rows exist, we skip the batch and log
-		// a warning. This prevents double-import if the same job is retried.
-		//
-		// Trade-off: if only SOME rows in the range exist (partial previous run),
-		// the entire batch is skipped. This is intentional — partial inserts
-		// from a crashed job are indistinguishable from legitimate data.
-		// Full re-import requires cancelling the previous job and using a fresh
-		// asset or a different time range.
 		if len(batch) > 0 && batch[0].AssetID != (uuid.UUID{}) {
 			existing, checkErr := countRangeRows(db, batch[0].AssetID, batch[0].Ts, batch[len(batch)-1].Ts)
-			if checkErr != nil {
-				log.Printf("⚠️  [Job %s] range check error (skipping idempotency): %v", jobID, checkErr)
-			} else if existing > 0 {
-				log.Printf("⚠️  [Job %s] batch %d/%d — SKIPPED (idempotent): %d rows already exist for ts [%s — %s]",
-					jobID, offset/batchSize+1, (len(rows)+batchSize-1)/batchSize,
-					existing, batch[0].Ts.Format(time.RFC3339), batch[len(batch)-1].Ts.Format(time.RFC3339))
-				rowsDone += int64(len(batch)) // count as "done" even if skipped
+			if checkErr == nil && existing > 0 {
+				log.Printf("⚠️  [Job %s] batch %d/%d — SKIPPED (idempotent)", jobID, offset/batchSize+1, (len(rows)+batchSize-1)/batchSize)
+				rowsDone += int64(len(batch))
 				updateJobProgress(db, jobID, rowsDone)
-				time.Sleep(workerBatchThrottle) // P5: throttle even on skip
+				time.Sleep(workerBatchThrottle)
 				continue
 			}
 		}
-
 		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
-			markJobFailed(db, jobID, fmt.Errorf("begin tx at offset %d: %w", offset, err))
+			markJobFailed(db, jobID, fmt.Errorf("begin tx: %w", err))
 			return err
 		}
-
 		n, err := BulkCopyTelemetryLog(tx, batch)
 		if err != nil {
 			_ = tx.Rollback()
-			markJobFailed(db, jobID, fmt.Errorf("COPY at offset %d: %w", offset, err))
+			markJobFailed(db, jobID, err)
 			return err
 		}
 		if err := tx.Commit(); err != nil {
-			markJobFailed(db, jobID, fmt.Errorf("commit at offset %d: %w", offset, err))
+			markJobFailed(db, jobID, err)
 			return err
 		}
-
 		rowsDone += n
-		elapsed := time.Since(batchStart)
-		rps := float64(n) / elapsed.Seconds()
-		log.Printf("   [Job %s] batch %d/%d — %d rows in %s (%.0f rows/s)",
-			jobID, offset/batchSize+1, (len(rows)+batchSize-1)/batchSize,
-			n, elapsed.Round(time.Millisecond), rps)
-
-		// Update progress.
 		updateJobProgress(db, jobID, rowsDone)
-
-		// P5: throttle between batches to avoid starving real-time ingest.
-		// 50ms sleep gives real-time requests priority on the DB connection pool.
+		log.Printf("   [Job %s] batch %d/%d — %d rows in %s", jobID, offset/batchSize+1, (len(rows)+batchSize-1)/batchSize, n, time.Since(batchStart).Round(time.Millisecond))
 		time.Sleep(workerBatchThrottle)
 	}
-
-	totalElapsed := time.Since(start)
-	log.Printf("✅ [ImportWorker] Job %s done: %d rows in %s (%.0f rows/s avg)",
-		jobID, rowsDone, totalElapsed.Round(time.Second), float64(rowsDone)/totalElapsed.Seconds())
-
+	log.Printf("✅ [ImportWorker] Job %s done: %d rows in %s", jobID, rowsDone, time.Since(start).Round(time.Second))
 	markJobDone(db, jobID, rowsDone)
 	return nil
 }
 
-// ─── DX HTTP job processor (stub for future expansion) ───────────────────────
+// ─── DX HTTP job processor ───────────────────────────────────────────────────
+// source_config JSON: { "url": "https://dx.../history", "asset_id": "uuid" (opcional), "headers": {} }
+// Resposta esperada: array de { "ts": "RFC3339", "metric_key": "...", "metric_value": 0 } ou { "rows": [...] }
 
 func processDXHTTPJob(ctx context.Context, db *sql.DB, job *ImportJob) error {
-	log.Printf("⚠️  [ImportWorker] Job %s: source_type=dx_http not yet implemented — marking failed", job.ID)
-	return fmt.Errorf("dx_http import not yet implemented in this version")
+	var cfg struct {
+		URL     string            `json:"url"`
+		AssetID string            `json:"asset_id"`
+		Headers map[string]string `json:"headers"`
+	}
+	if len(job.SourceConfig) > 0 {
+		if err := json.Unmarshal(job.SourceConfig, &cfg); err != nil {
+			return fmt.Errorf("source_config inválido: %w", err)
+		}
+	}
+	if cfg.URL == "" {
+		return fmt.Errorf("source_config.url é obrigatório para dx_http")
+	}
+	assetID := job.AssetID
+	if assetID == nil && cfg.AssetID != "" {
+		u, err := uuid.Parse(cfg.AssetID)
+		if err != nil {
+			return fmt.Errorf("source_config.asset_id inválido: %w", err)
+		}
+		assetID = &u
+	}
+	if assetID == nil {
+		return fmt.Errorf("asset_id obrigatório (job ou source_config.asset_id)")
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.URL, nil)
+	if err != nil {
+		return fmt.Errorf("criar request: %w", err)
+	}
+	for k, v := range cfg.Headers {
+		req.Header.Set(k, v)
+	}
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("request ao DX: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("DX retornou HTTP %d", resp.StatusCode)
+	}
+
+	type rowStruct struct {
+		Ts          string  `json:"ts"`
+		MetricKey   string  `json:"metric_key"`
+		MetricValue float64 `json:"metric_value"`
+		Status      string  `json:"status"`
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("ler corpo da resposta DX: %w", err)
+	}
+	var raw struct {
+		Rows []rowStruct `json:"rows"`
+	}
+	_ = json.Unmarshal(body, &raw)
+	if len(raw.Rows) == 0 {
+		var arr []rowStruct
+		if json.Unmarshal(body, &arr) == nil {
+			raw.Rows = arr
+		}
+	}
+	if len(raw.Rows) == 0 {
+		log.Printf("⚠️  [ImportWorker] Job %s: DX retornou 0 linhas", job.ID)
+		markJobDone(db, job.ID, 0)
+		return nil
+	}
+
+	rows := make([]BulkTelemetryRow, 0, len(raw.Rows))
+	for _, r := range raw.Rows {
+		if r.MetricKey == "" {
+			continue
+		}
+		ts := time.Now()
+		if r.Ts != "" {
+			if t, err := time.Parse(time.RFC3339, r.Ts); err == nil {
+				ts = t
+			}
+		}
+		status := r.Status
+		if status == "" {
+			status = "OK"
+		}
+		rows = append(rows, BulkTelemetryRow{
+			Ts:            ts,
+			FactoryID:     job.FactoryID,
+			AssetID:       *assetID,
+			MetricKey:     r.MetricKey,
+			MetricValue:   r.MetricValue,
+			Status:        status,
+			CorrelationID: job.ID.String(),
+		})
+	}
+	if len(rows) == 0 {
+		markJobDone(db, job.ID, 0)
+		return nil
+	}
+
+	// Claim job and run same batch insert as memory
+	res, err := db.ExecContext(ctx, `
+		UPDATE nxd.import_jobs
+		SET status = 'running', started_at = NOW(), rows_total = $2, updated_at = NOW()
+		WHERE id = $1 AND status = 'pending'
+	`, job.ID, int64(len(rows)))
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("job %s não está pending", job.ID)
+	}
+	log.Printf("🔄 [ImportWorker] DX HTTP job %s: %d rows de %s", job.ID, len(rows), cfg.URL)
+	return runBatchInsertFromRows(ctx, db, job.ID, job.BatchSize, rows)
 }
 
 // ─── Job status helpers ───────────────────────────────────────────────────────

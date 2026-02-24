@@ -42,9 +42,9 @@ export default function RegenerateKeyModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="p-8 bg-white rounded-lg shadow-2xl w-full max-w-lg">
-        <h1 className="text-2xl font-bold mb-4 text-red-600">Atenção: Regenerar Chave de API</h1>
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="regen-modal-title">
+      <div className="p-8 bg-white rounded-xl shadow-2xl w-full max-w-lg border border-gray-200">
+        <h1 id="regen-modal-title" className="text-2xl font-bold mb-4 text-red-600">Atenção: Regenerar Chave de API</h1>
         <p className="text-gray-600 mb-4">
           Você está prestes a invalidar sua chave de API atual. Todos os sistemas que a utilizam deixarão de funcionar até que sejam atualizados com a nova chave.
         </p>
@@ -57,13 +57,13 @@ export default function RegenerateKeyModal({ onClose }) {
             </div>
             <div className="relative mb-4">
               <input type="text" readOnly value={newApiKey} className="w-full px-3 py-2 bg-gray-100 border rounded-lg pr-10" />
-              <button onClick={handleCopy} className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-800">
+              <button type="button" onClick={handleCopy} className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-800" aria-label="Copiar chave">
                 <CopyIcon />
               </button>
             </div>
-            {copySuccess && <p className="text-green-600 text-sm mb-4">{copySuccess}</p>}
+            {copySuccess && <p className="text-green-600 text-sm mb-4" role="status" aria-live="polite">{copySuccess}</p>}
             <div className="flex justify-end">
-              <button onClick={onClose} className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg">
+              <button type="button" onClick={onClose} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg">
                 Fechar
               </button>
             </div>
@@ -76,15 +76,16 @@ export default function RegenerateKeyModal({ onClose }) {
                 Eu entendo que minha chave de API atual será permanentemente invalidada e que esta nova chave não poderá ser vista novamente após fechar esta janela.
               </label>
             </div>
-            {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
-            <div className="flex justify-between items-center">
-              <button onClick={onClose} className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg">
+            {error && <p className="text-red-600 text-sm mb-4 p-2 bg-red-50 border border-red-200 rounded-lg" role="alert">{error}</p>}
+            <div className="flex justify-between items-center gap-3">
+              <button type="button" onClick={onClose} className="bg-gray-500 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg">
                 Cancelar
               </button>
               <button
+                type="button"
                 onClick={handleRegenerateKey}
                 disabled={!hasAcknowledged || isLoading}
-                className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg disabled:bg-gray-400"
+                className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isLoading ? 'Gerando...' : 'Invalidar Chave Antiga e Gerar Nova'}
               </button>

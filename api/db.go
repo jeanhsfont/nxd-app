@@ -34,19 +34,67 @@ func InitDB() error {
 		return err
 	}
 
+	if driverName == "postgres" {
+		if _, err := db.Exec("SET search_path TO public"); err != nil {
+			log.Printf("⚠️  SET search_path falhou (ignorando): %v", err)
+		}
+	}
+
 	log.Println("✓ Conexão com o banco de dados estabelecida com sucesso.")
-	return runMigrations(driverName)
+	if err := runMigrations(driverName); err != nil {
+		db.Close()
+		db = nil
+		return err
+	}
+	return nil
 }
 
 func GetDB() *sql.DB {
 	return db
 }
 
+// EnsureAuthTables cria public.users e public.factories se não existirem (Postgres).
+// Chamado em todo Register/Login para que, mesmo se InitDB falhou no cold start, a primeira
+// requisição que conseguir conectar crie as tabelas. Sem sync.Once para permitir retry até dar certo.
+func EnsureAuthTables() {
+	if db == nil || os.Getenv("DATABASE_URL") == "" {
+		return
+	}
+	for _, q := range []string{
+		`CREATE TABLE IF NOT EXISTS public.users (
+			id SERIAL PRIMARY KEY,
+			email TEXT NOT NULL UNIQUE,
+			password_hash TEXT NOT NULL,
+			full_name TEXT,
+			cpf TEXT,
+			two_factor_enabled BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS public.factories (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL UNIQUE,
+			name TEXT NOT NULL,
+			cnpj TEXT,
+			address TEXT,
+			api_key_hash TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY(user_id) REFERENCES public.users(id)
+		)`,
+		`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'free'`,
+		`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS next_billing_date DATE`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			log.Printf("[EnsureAuthTables] %v", err)
+			return
+		}
+	}
+}
+
 func runMigrations(driverName string) error {
 	var userTableSQL string
 	if driverName == "postgres" {
 		userTableSQL = `
-		CREATE TABLE IF NOT EXISTS users (
+		CREATE TABLE IF NOT EXISTS public.users (
 			id SERIAL PRIMARY KEY,
 			email TEXT NOT NULL UNIQUE,
 			password_hash TEXT NOT NULL,
@@ -80,7 +128,7 @@ func createFactoryTable(driverName string) error {
 	var factoryTableSQL string
 	if driverName == "postgres" {
 		factoryTableSQL = `
-		CREATE TABLE IF NOT EXISTS factories (
+		CREATE TABLE IF NOT EXISTS public.factories (
 			id SERIAL PRIMARY KEY,
 			user_id INTEGER NOT NULL UNIQUE,
 			name TEXT NOT NULL,
@@ -88,7 +136,7 @@ func createFactoryTable(driverName string) error {
 			address TEXT,
 			api_key_hash TEXT,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY(user_id) REFERENCES users(id)
+			FOREIGN KEY(user_id) REFERENCES public.users(id)
 		);`
 	} else {
 		factoryTableSQL = `
@@ -117,34 +165,34 @@ func createAssetAndTelemetryTables(driverName string) error {
 
 	if driverName == "postgres" {
 		sectorsTableSQL = `
-		CREATE TABLE IF NOT EXISTS sectors (
+		CREATE TABLE IF NOT EXISTS public.sectors (
 			id SERIAL PRIMARY KEY,
 			factory_id INTEGER NOT NULL,
 			name TEXT NOT NULL,
 			description TEXT,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY(factory_id) REFERENCES factories(id)
+			FOREIGN KEY(factory_id) REFERENCES public.factories(id)
 		);`
 
 		assetsTableSQL = `
-		CREATE TABLE IF NOT EXISTS assets (
+		CREATE TABLE IF NOT EXISTS public.assets (
 			id SERIAL PRIMARY KEY,
 			factory_id INTEGER NOT NULL,
-			sector_id INTEGER, -- Pode ser nulo se o ativo ainda não foi categorizado
+			sector_id INTEGER,
 			name TEXT NOT NULL,
 			description TEXT,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-			FOREIGN KEY(factory_id) REFERENCES factories(id),
-			FOREIGN KEY(sector_id) REFERENCES sectors(id)
+			FOREIGN KEY(factory_id) REFERENCES public.factories(id),
+			FOREIGN KEY(sector_id) REFERENCES public.sectors(id)
 		);`
 
 		telemetryTableSQL = `
-		CREATE TABLE IF NOT EXISTS asset_telemetry (
+		CREATE TABLE IF NOT EXISTS public.asset_telemetry (
 			id BIGSERIAL PRIMARY KEY,
 			asset_id INTEGER NOT NULL,
 			timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-			payload JSONB NOT NULL, -- Usamos JSONB para flexibilidade nos dados de telemetria
-			FOREIGN KEY(asset_id) REFERENCES assets(id)
+			payload JSONB NOT NULL,
+			FOREIGN KEY(asset_id) REFERENCES public.assets(id)
 		);`
 
 	} else { // SQLite
@@ -195,5 +243,50 @@ func createAssetAndTelemetryTables(driverName string) error {
 	}
 	log.Println("✓ Migração da tabela 'asset_telemetry' executada.")
 
+	return ensureBillingAndSupportTables(driverName)
+}
+
+func ensureBillingAndSupportTables(driverName string) error {
+	if driverName == "postgres" {
+		for _, q := range []string{
+			`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'free'`,
+			`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS next_billing_date DATE`,
+		} {
+			if _, err := db.Exec(q); err != nil {
+				log.Printf("⚠️  Billing migration (ignorável se já existe): %v", err)
+			}
+		}
+		supportSQL := `
+		CREATE TABLE IF NOT EXISTS public.support_tickets (
+			id SERIAL PRIMARY KEY,
+			user_id INTEGER NOT NULL REFERENCES public.users(id),
+			email TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			message TEXT NOT NULL,
+			status TEXT DEFAULT 'open',
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		);`
+		if _, err := db.Exec(supportSQL); err != nil {
+			return err
+		}
+	} else {
+		// SQLite: ADD COLUMN não tem IF NOT EXISTS
+		_, _ = db.Exec(`ALTER TABLE factories ADD COLUMN subscription_plan TEXT DEFAULT 'free'`)
+		_, _ = db.Exec(`ALTER TABLE factories ADD COLUMN next_billing_date TEXT`)
+		supportSQL := `
+		CREATE TABLE IF NOT EXISTS support_tickets (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL REFERENCES users(id),
+			email TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			message TEXT NOT NULL,
+			status TEXT DEFAULT 'open',
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		);`
+		if _, err := db.Exec(supportSQL); err != nil {
+			return err
+		}
+	}
+	log.Println("✓ Migração cobrança e suporte executada.")
 	return nil
 }

@@ -1,6 +1,6 @@
 import React from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Cuboid, Bot, Settings, LogOut, Network } from 'lucide-react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Cuboid, Bot, Settings, LogOut, Download, DollarSign, CreditCard, FileText, HelpCircle } from 'lucide-react';
 import { clsx } from 'clsx';
 
 function NavItem({ to, icon: Icon, children }) {
@@ -23,7 +23,15 @@ function NavItem({ to, icon: Icon, children }) {
   );
 }
 
-export default function MainLayout() {
+export default function MainLayout({ contentOverride }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const handleLogout = () => {
+    localStorage.removeItem('nxd-token');
+    navigate('/login');
+  };
+
   return (
     <div className="flex h-screen bg-gray-50 font-sans">
       {/* Global Sidebar */}
@@ -41,22 +49,25 @@ export default function MainLayout() {
           </div>
           <NavItem to="/" icon={LayoutDashboard}>Dashboard</NavItem>
           <NavItem to="/assets" icon={Cuboid}>Gestão de Ativos</NavItem>
-          <NavItem to="/sectors" icon={Network}>Gestão de Setores</NavItem>
           
           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">
             Inteligência
           </div>
-          <NavItem to="/ia" icon={Bot}>Chat IA & Reports</NavItem>
-          <NavItem to="/ia-reports" icon={Bot}>Análise IA</NavItem>
+          <NavItem to="/ia" icon={Bot}>NXD Intelligence</NavItem>
+          <NavItem to="/import" icon={Download}>Importar histórico</NavItem>
+          <NavItem to="/financial" icon={DollarSign}>Indicadores financeiros</NavItem>
 
           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-8 px-4">
             Configuração
           </div>
           <NavItem to="/settings" icon={Settings}>Ajustes</NavItem>
+          <NavItem to="/billing" icon={CreditCard}>Cobrança</NavItem>
+          <NavItem to="/terms" icon={FileText}>Termos</NavItem>
+          <NavItem to="/support" icon={HelpCircle}>Suporte</NavItem>
         </nav>
 
         <div className="p-4 border-t border-gray-100">
-          <button className="flex items-center gap-3 px-4 py-3 w-full text-left text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium">
+          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 w-full text-left text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium">
             <LogOut className="w-5 h-5" />
             Sair
           </button>
@@ -65,7 +76,7 @@ export default function MainLayout() {
 
       {/* Main Content Area */}
       <div className="flex-1 ml-64 overflow-auto">
-        <Outlet />
+        {contentOverride ?? <Outlet />}
       </div>
     </div>
   );

@@ -2,10 +2,26 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+func tableSectors() string {
+	if Driver() == "postgres" {
+		return "nxd.sectors"
+	}
+	return "sectors"
+}
+
+func tableAssets() string {
+	if Driver() == "postgres" {
+		return "nxd.assets"
+	}
+	return "assets"
+}
 
 // SectorRow represents a row from the sectors table.
 type SectorRow struct {
@@ -18,8 +34,9 @@ type SectorRow struct {
 
 // ListSectors returns all sectors for a given factory.
 func ListSectors(db *sql.DB, factoryID uuid.UUID) ([]SectorRow, error) {
+	t := tableSectors()
 	rows, err := db.Query(
-		`SELECT id, factory_id, name, COALESCE(description, ''), created_at FROM sectors WHERE factory_id = $1 ORDER BY name`,
+		fmt.Sprintf("SELECT id, factory_id, name, COALESCE(description, ''), created_at FROM %s WHERE factory_id = $1 ORDER BY name", t),
 		factoryID,
 	)
 	if err != nil {
@@ -41,8 +58,9 @@ func ListSectors(db *sql.DB, factoryID uuid.UUID) ([]SectorRow, error) {
 // CreateSector inserts a new sector into the database.
 func CreateSector(db *sql.DB, factoryID uuid.UUID, name string, description string) (uuid.UUID, error) {
 	id := uuid.New()
+	t := tableSectors()
 	_, err := db.Exec(
-		`INSERT INTO sectors (id, factory_id, name, description) VALUES ($1, $2, $3, $4)`,
+		fmt.Sprintf("INSERT INTO %s (id, factory_id, name, description) VALUES ($1, $2, $3, $4)", t),
 		id, factoryID, name, description,
 	)
 	return id, err
@@ -50,8 +68,9 @@ func CreateSector(db *sql.DB, factoryID uuid.UUID, name string, description stri
 
 // UpdateSector updates a sector's name and description.
 func UpdateSector(db *sql.DB, sectorID uuid.UUID, factoryID uuid.UUID, name string, description string) error {
+	t := tableSectors()
 	_, err := db.Exec(
-		`UPDATE sectors SET name = $1, description = $2 WHERE id = $3 AND factory_id = $4`,
+		fmt.Sprintf("UPDATE %s SET name = $1, description = $2 WHERE id = $3 AND factory_id = $4", t),
 		name, description, sectorID, factoryID,
 	)
 	return err
@@ -59,15 +78,12 @@ func UpdateSector(db *sql.DB, sectorID uuid.UUID, factoryID uuid.UUID, name stri
 
 // DeleteSector removes a sector from the database.
 func DeleteSector(db *sql.DB, sectorID uuid.UUID, factoryID uuid.UUID) error {
-	// Antes de deletar, precisamos garantir que nenhum ativo está usando este setor.
-	// O ideal é desassociar os ativos ou impedir a exclusão se houver algum associado.
-	// Por enquanto, vamos desassociar.
-	_, err := db.Exec(`UPDATE assets SET sector_id = NULL WHERE sector_id = $1 AND factory_id = $2`, sectorID, factoryID)
-	if err != nil {
-		return err
+	ts := tableSectors()
+	if Driver() == "postgres" {
+		ta := tableAssets()
+		_, _ = db.Exec(fmt.Sprintf("UPDATE %s SET group_id = NULL WHERE group_id = $1 AND factory_id = $2", ta), sectorID, factoryID)
 	}
-
-	_, err = db.Exec(`DELETE FROM sectors WHERE id = $1 AND factory_id = $2`, sectorID, factoryID)
+	_, err := db.Exec(fmt.Sprintf("DELETE FROM %s WHERE id = $1 AND factory_id = $2", ts), sectorID, factoryID)
 	return err
 }
 
@@ -112,30 +128,48 @@ func ListAssetsBySector(db *sql.DB, sectorID uuid.UUID) ([]AssetRow, error) {
 	return list, rows.Err()
 }
 
-// ListTelemetryByAssets returns all telemetry data for a given list of asset IDs.
-func ListTelemetryByAssets(db *sql.DB, assetIDs []uuid.UUID) ([]AssetTelemetryRow, error) {
-	// Se não houver IDs de ativos, não há nada a fazer.
+// NXDTelemetryRow represents a condensed telemetry entry from nxd.telemetry_log,
+// used by ReportIAHandler to build the IA analysis prompt.
+type NXDTelemetryRow struct {
+	AssetID     uuid.UUID `json:"asset_id"`
+	AssetName   string    `json:"asset_name"`
+	MetricKey   string    `json:"metric_key"`
+	MetricValue float64   `json:"metric_value"`
+	Timestamp   time.Time `json:"timestamp"`
+	Status      string    `json:"status"`
+}
+
+// ListTelemetryByAssets returns the latest telemetry data for a list of asset IDs
+// from nxd.telemetry_log (PostgreSQL, schema nxd). Uses $1,$2,... placeholders.
+// Returns up to 500 rows ordered by timestamp DESC for IA prompt construction.
+func ListTelemetryByAssets(db *sql.DB, assetIDs []uuid.UUID) ([]NXDTelemetryRow, error) {
 	if len(assetIDs) == 0 {
-		return []AssetTelemetryRow{}, nil
+		return []NXDTelemetryRow{}, nil
 	}
 
-	// Construir a query com placeholders para a lista de IDs.
-	// NOTA: A forma de fazer isso pode variar um pouco dependendo do driver do banco de dados (PostgreSQL vs SQLite).
-	// Esta abordagem é mais genérica, mas para PostgreSQL, poderíamos usar `ANY($1)`.
-	query := `SELECT id, asset_id, timestamp, payload FROM asset_telemetry WHERE asset_id IN (`
+	// Build PostgreSQL $1,$2,... placeholders for the IN clause.
+	// We pass them starting at $1; asset_ids occupy $1..$N.
 	args := make([]interface{}, len(assetIDs))
+	placeholders := make([]string, len(assetIDs))
 	for i, id := range assetIDs {
-		if i > 0 {
-			query += ","
-		}
-		query += "?" // Placeholder
 		args[i] = id
+		placeholders[i] = fmt.Sprintf("$%d", i+1)
 	}
-	query += `) ORDER BY timestamp DESC`
 
-	// TODO: O placeholder "?" é para SQLite. Se estiver usando PostgreSQL, precisa ser "$1, $2, ...".
-	// Uma biblioteca como sqlx ou gorm abstrai isso, mas com `database/sql` puro, precisamos de mais lógica
-	// para suportar ambos os bancos de dados de forma limpa. Por enquanto, focando em SQLite.
+	query := fmt.Sprintf(`
+		SELECT
+			tl.asset_id,
+			COALESCE(a.display_name, a.source_tag_id, tl.asset_id::text) AS asset_name,
+			tl.metric_key,
+			tl.metric_value,
+			tl.ts,
+			COALESCE(tl.status, 'OK') AS status
+		FROM nxd.telemetry_log tl
+		LEFT JOIN nxd.assets a ON a.id = tl.asset_id
+		WHERE tl.asset_id IN (%s)
+		ORDER BY tl.ts DESC
+		LIMIT 500
+	`, strings.Join(placeholders, ","))
 
 	rows, err := db.Query(query, args...)
 	if err != nil {
@@ -143,10 +177,10 @@ func ListTelemetryByAssets(db *sql.DB, assetIDs []uuid.UUID) ([]AssetTelemetryRo
 	}
 	defer rows.Close()
 
-	var list []AssetTelemetryRow
+	var list []NXDTelemetryRow
 	for rows.Next() {
-		var r AssetTelemetryRow
-		if err := rows.Scan(&r.ID, &r.AssetID, &r.Timestamp, &r.Payload); err != nil {
+		var r NXDTelemetryRow
+		if err := rows.Scan(&r.AssetID, &r.AssetName, &r.MetricKey, &r.MetricValue, &r.Timestamp, &r.Status); err != nil {
 			return nil, err
 		}
 		list = append(list, r)

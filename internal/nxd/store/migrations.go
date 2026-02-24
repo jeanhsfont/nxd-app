@@ -172,6 +172,14 @@ var postgresMigrations = []string{
 	// Backfill prefix from existing plaintext api_key column (safe: non-destructive).
 	`UPDATE nxd.factories SET api_key_prefix = LEFT(api_key, 16) WHERE api_key IS NOT NULL AND api_key_prefix IS NULL`,
 
+	// ─── Fix nxd.sectors schema ──────────────────────────────────────────────
+	// The original CREATE TABLE IF NOT EXISTS for nxd.sectors may have been executed
+	// without the factory_id column if the table existed from a prior schema version.
+	// These ALTER TABLE ... ADD COLUMN IF NOT EXISTS statements bring it up to spec.
+	// Idempotent: IF NOT EXISTS means they are safe to run multiple times.
+	`ALTER TABLE nxd.sectors ADD COLUMN IF NOT EXISTS factory_id UUID REFERENCES nxd.factories(id) ON DELETE CASCADE`,
+	`CREATE INDEX IF NOT EXISTS idx_sectors_factory_id ON nxd.sectors (factory_id) WHERE factory_id IS NOT NULL`,
+
 	// Alert rules
 	`CREATE TABLE IF NOT EXISTS nxd.alert_rules (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -292,6 +300,38 @@ var postgresMigrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_telemetry_log_import_range
 		ON nxd.telemetry_log (asset_id, ts)
 		WHERE asset_id IS NOT NULL`,
+
+	// ─── MVP Indicadores Financeiros: Configuração de negócio por setor ─────
+	// Unidade de cálculo: Setor (ou linha = conjunto de ativos no setor).
+	// Parâmetros: valor_venda_ok (R$/un), custo_refugo_un (R$/un), custo_parada_h (R$/h).
+	`CREATE TABLE IF NOT EXISTS nxd.business_config (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		factory_id UUID NOT NULL REFERENCES nxd.factories(id) ON DELETE CASCADE,
+		sector_id UUID REFERENCES nxd.sectors(id) ON DELETE CASCADE,
+		valor_venda_ok NUMERIC(18,4) NOT NULL DEFAULT 0,
+		custo_refugo_un NUMERIC(18,4) NOT NULL DEFAULT 0,
+		custo_parada_h NUMERIC(18,4) NOT NULL DEFAULT 0,
+		created_at TIMESTAMPTZ DEFAULT NOW(),
+		updated_at TIMESTAMPTZ DEFAULT NOW(),
+		UNIQUE(factory_id, sector_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_business_config_factory ON nxd.business_config (factory_id)`,
+	// Apenas uma config "padrão" (sector_id NULL) por fábrica.
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_business_config_factory_default ON nxd.business_config (factory_id) WHERE sector_id IS NULL`,
+
+	// Mapeamento de tags do CLP por ativo (linha/máquina): OK, NOK, Status.
+	// reading_rule: 'delta' = usar variação por período; 'absolute' = usar valor absoluto.
+	`CREATE TABLE IF NOT EXISTS nxd.tag_mapping (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		asset_id UUID NOT NULL REFERENCES nxd.assets(id) ON DELETE CASCADE UNIQUE,
+		tag_ok TEXT,
+		tag_nok TEXT,
+		tag_status TEXT,
+		reading_rule TEXT NOT NULL DEFAULT 'delta',
+		created_at TIMESTAMPTZ DEFAULT NOW(),
+		updated_at TIMESTAMPTZ DEFAULT NOW()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_tag_mapping_asset ON nxd.tag_mapping (asset_id)`,
 }
 
 var sqliteMigrations = []string{

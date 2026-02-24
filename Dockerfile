@@ -1,41 +1,45 @@
-# Build stage
-FROM golang:1.21-bullseye AS builder
+# Etapa 1: Build
+# Usamos uma imagem oficial do Go para compilar nossa aplicação.
+# Especificamos a versão para garantir builds consistentes.
+FROM golang:1.24-alpine AS builder
 
-WORKDIR /build
-
-# Copy go mod files
-COPY go.mod ./
-COPY go.sum* ./
-RUN go mod download
-
-# Copy source code
-COPY core/ ./core/
-COPY api/ ./api/
-COPY data/ ./data/
-COPY services/ ./services/
-COPY web/ ./web/
-COPY main.go ./
-
-# Build
-RUN CGO_ENABLED=1 go build -o hub_server .
-
-# Runtime stage - Debian para compatibilidade com sqlite
-FROM debian:bullseye-slim
-
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    sqlite3 \
-    && rm -rf /var/lib/apt/lists/*
-
+# Define o diretório de trabalho dentro do contêiner.
 WORKDIR /app
 
-# Copy binary and web files
-COPY --from=builder /build/hub_server .
-COPY --from=builder /build/web ./web
+# Copia os arquivos de gerenciamento de dependências.
+COPY go.mod go.sum ./
 
-# Create directories
-RUN mkdir -p /app/data /app/logs
+# Baixa as dependências.
+RUN go mod download
 
-EXPOSE 8080
+# Copia todo o código fonte para o contêiner.
+COPY . .
 
-CMD ["./hub_server"]
+# Compila a aplicação para um binário estático para Linux.
+# CGO_ENABLED=0 desabilita o CGO, necessário para compilações estáticas.
+# GOOS=linux especifica o sistema operacional de destino.
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server .
+
+# ---
+
+# Etapa 2: Imagem Final
+# Usamos uma imagem 'alpine' que é mínima mas inclui ferramentas de depuração.
+FROM alpine:latest
+
+# Define o diretório de trabalho.
+WORKDIR /app
+
+# Copia o executável compilado da etapa de build.
+COPY --from=builder /app/server .
+
+# Copia o frontend compilado (React/Vite dist).
+COPY --from=builder /app/dist ./dist
+
+# Copia os certificados CA da imagem de build para permitir comunicação HTTPS.
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+
+# Expõe a porta que a aplicação usará (será definida pela variável de ambiente PORT).
+EXPOSE 8081
+
+# Comando para iniciar o servidor quando o contêiner for executado.
+CMD ["/app/server"]

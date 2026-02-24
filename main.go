@@ -8,63 +8,74 @@ import (
 	"hubsystem/internal/nxd/store"
 
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 )
 
 // BuildVersion is set at compile time via -ldflags="-X main.BuildVersion=..."
-// by cloudbuild.yaml using the Cloud Build $BUILD_ID variable.
-// This ensures each deployed revision has a unique, traceable version string.
 var BuildVersion = "dev"
+
+// startupWrapper abre a porta na hora; responde 200 até o handler real estar pronto (Cloud Run).
+type startupWrapper struct {
+	mu   sync.RWMutex
+	real http.Handler
+}
+
+func (s *startupWrapper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	h := s.real
+	s.mu.RUnlock()
+	if h != nil {
+		h.ServeHTTP(w, r)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
+}
+
+func (s *startupWrapper) setHandler(h http.Handler) {
+	s.mu.Lock()
+	s.real = h
+	s.mu.Unlock()
+}
 
 func main() {
 	log.SetOutput(os.Stdout)
 	log.Printf("Application entrypoint reached. Build: %s", BuildVersion)
-	// Expose build version to handlers via env var (overrides any injected env)
 	if BuildVersion != "dev" {
 		os.Setenv("BUILD_VERSION", BuildVersion)
 	}
-	api.InitAuth() // Carrega o segredo JWT
-	config.Load()
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	addr := ":" + port
+	wrapper := &startupWrapper{}
+
+	// Bind síncrono na porta para Cloud Run detectar o listen dentro do timeout de startup.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("❌ Erro ao abrir porta %s: %v", addr, err)
+	}
+	log.Printf("✓ Porta %s aberta (Cloud Run startup).", addr)
+	go func() {
+		if err := http.Serve(ln, wrapper); err != nil {
+			log.Fatalf("❌ Erro ao servir: %v", err)
+		}
+	}()
+
 	log.Println("🚀 Iniciando NXD (Nexus Data Exchange)...")
 
-	// Inicializa o banco de dados da API legada (SQLite ou Postgres via DATABASE_URL)
-	if os.Getenv("DATABASE_URL") == "" {
-		log.Println("ℹ️  DATABASE_URL not set. Initializing legacy API database with local SQLite.")
-	} else {
-		log.Println("ℹ️  DATABASE_URL is set. Initializing legacy API database with PostgreSQL.")
-	}
-	if err := api.InitDB(); err != nil {
-		log.Fatalf("❌ Erro ao inicializar banco de dados da API: %v", err)
-	}
-
-	// Inicializa o banco de dados NXD (schema nxd.*)
-	if err := store.InitNXDDB(); err != nil {
-		log.Printf("⚠️  Erro ao inicializar banco NXD (store): %v — sistema continua sem NXD store", err)
-	} else {
-		log.Println("✓ Banco de dados NXD (store) inicializado.")
-	}
-
-	// Inicia o worker de importação de dados históricos ("Download Longo").
-	// Roda como goroutine; será interrompido quando o contexto for cancelado.
-	workerCtx, workerCancel := context.WithCancel(context.Background())
-	if nxdDB := store.NXDDB(); nxdDB != nil {
-		go store.RunImportWorker(workerCtx, nxdDB)
-		log.Println("✓ Worker de importação histórica iniciado.")
-	} else {
-		log.Println("⚠️  NXD DB indisponível — worker de importação não iniciado.")
-		workerCancel() // cancel imediatamente se não há DB
-		_ = workerCancel
-	}
-	defer workerCancel()
-
-	// Configura rotas
 	router := mux.NewRouter()
 
 	// API Routes
@@ -79,6 +90,8 @@ func main() {
 	// Rotas Autenticadas via JWT
 	authRouter := router.PathPrefix("/api").Subrouter()
 	authRouter.Use(middleware.AuthMiddleware)
+	// Consulta CNPJ (dados públicos) — pré-preenchimento no cadastro da empresa
+	authRouter.HandleFunc("/cnpj", api.CNPJLookupHandler).Methods("GET")
 	// Onboarding (autenticado — precisa do JWT para saber qual usuário está completando o cadastro)
 	authRouter.HandleFunc("/onboarding", api.OnboardingHandler).Methods("POST")
 	// Fábrica (autenticado)
@@ -96,11 +109,22 @@ func main() {
 	authRouter.HandleFunc("/machine/asset", api.UpdateMachineAssetHandler).Methods("PUT")
 	authRouter.HandleFunc("/report/ia", api.ReportIAHandler).Methods("POST")
 	authRouter.HandleFunc("/machine/delete", api.DeleteMachineHandler).Methods("DELETE")
+	// Config negócio + indicadores financeiros (MVP)
+	authRouter.HandleFunc("/business-config", api.ListBusinessConfigHandler).Methods("GET")
+	authRouter.HandleFunc("/business-config", api.UpsertBusinessConfigHandler).Methods("POST")
+	authRouter.HandleFunc("/tag-mappings", api.ListTagMappingsHandler).Methods("GET")
+	authRouter.HandleFunc("/tag-mappings", api.UpsertTagMappingHandler).Methods("POST")
+	authRouter.HandleFunc("/financial-summary", api.GetFinancialSummaryHandler).Methods("GET")
+	authRouter.HandleFunc("/financial-summary/ranges", api.GetFinancialSummaryRangesHandler).Methods("GET")
 	// 2FA TOTP
 	authRouter.HandleFunc("/auth/2fa/setup", api.SetupTOTPHandler).Methods("GET")
 	authRouter.HandleFunc("/auth/2fa/confirm", api.ConfirmTOTPHandler).Methods("POST")
 	authRouter.HandleFunc("/auth/2fa/disable", api.DisableTOTPHandler).Methods("POST")
 	authRouter.HandleFunc("/auth/2fa/status", api.TOTPStatusHandler).Methods("GET")
+	// Cobrança e suporte (reais: persistem no banco)
+	authRouter.HandleFunc("/billing/plan", api.GetBillingPlanHandler).Methods("GET")
+	authRouter.HandleFunc("/billing/plan", api.UpdateBillingPlanHandler).Methods("POST")
+	authRouter.HandleFunc("/support", api.CreateSupportTicketHandler).Methods("POST")
 
 	// ─── Admin: Import Jobs ("Download Longo") ────────────────────────────────
 	// All routes require JWT. Factory is inferred from the authenticated user.
@@ -138,50 +162,59 @@ func main() {
 
 	// Configura CORS
 	c := cors.New(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins: []string{
+			"http://localhost:5173", // Vite Dev
+			"http://localhost:8080", // Local Docker
+			"https://hubsystem-frontend-925156909645.us-central1.run.app", // Cloud Run Frontend
+			"https://hubsystem-nxd-925156909645.us-central1.run.app",     // NXD unificado (SPA servida pelo mesmo serviço)
+		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"*"},
 		AllowCredentials: true,
 	})
 
-	handler := c.Handler(router)
+	handler := middleware.RecoverMiddleware(c.Handler(router))
+	wrapper.setHandler(handler)
+	log.Printf("✓ Handler principal ativo em http://0.0.0.0:%s", port)
 
-	// O Cloud Run define a variável de ambiente PORT para informar em qual porta
-	// o contêiner deve escutar.
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8081"
-		log.Printf("⚠️ Variável de ambiente PORT não definida, usando porta padrão: %s", port)
+	// Inicializa auth, config e bancos (porta já aberta)
+	api.InitAuth()
+	config.Load()
+
+	// Inicializa o banco da API legada (SQLite ou Postgres)
+	if os.Getenv("DATABASE_URL") == "" {
+		log.Println("ℹ️  DATABASE_URL not set. Initializing legacy API database with local SQLite.")
+	} else {
+		log.Println("ℹ️  DATABASE_URL is set. Initializing legacy API database with PostgreSQL.")
+	}
+	var apiDBOk bool
+	for i := 0; i < 5; i++ {
+		if err := api.InitDB(); err != nil {
+			log.Printf("❌ Erro ao inicializar banco da API (tentativa %d/5): %v", i+1, err)
+			if i < 4 {
+				time.Sleep(3 * time.Second)
+			}
+			continue
+		}
+		apiDBOk = true
+		break
+	}
+	if !apiDBOk {
+		log.Printf("❌ Banco da API não inicializado após 5 tentativas — registro/login vão retornar 503")
+	}
+	if err := store.InitNXDDB(); err != nil {
+		log.Printf("⚠️  Erro ao inicializar banco NXD (store): %v — sistema continua sem NXD store", err)
+	} else {
+		log.Println("✓ Banco de dados NXD (store) inicializado.")
+		workerCtx, workerCancel := context.WithCancel(context.Background())
+		go store.RunImportWorker(workerCtx, store.NXDDB())
+		log.Println("✓ Worker de importação histórica iniciado.")
+		_ = workerCancel
 	}
 
-	log.Printf("✓ Servidor rodando em http://localhost:%s", port)
-	log.Println("✓ Endpoints disponíveis:")
-	log.Println("  - POST /api/ingest (Recebe dados do DX)")
-	log.Println("  - POST /api/factory/create (Cria nova fábrica)")
-	log.Println("  - GET  /api/dashboard?api_key=XXX (Dashboard)")
-	log.Println("  - GET  /api/analytics?api_key=XXX (Analytics)")
-	log.Println("  - GET  /api/connection/status?api_key=XXX (Status de Conexão)")
-	log.Println("  - GET  /api/connection/logs?api_key=XXX (Logs de Conexão)")
-	log.Println("  - GET  /api/health (Health check)")
-	log.Println("  - GET  /api/system (Parâmetros do sistema, ex.: ia_operando_100)")
-	log.Println("  - WS   /ws (WebSocket)")
-
-	// Captura sinais de interrupção
-	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-		<-sigChan
-		log.Println("\n🛑 Encerrando servidor...")
-		os.Exit(0)
-	}()
-
-	// É crucial escutar em "0.0.0.0" (representado por ":" antes da porta)
-	// para aceitar conexões de fora do contêiner.
-	addr := ":" + port
-	log.Printf("🚀 Servidor escutando em %s", addr)
-
-	// Inicia o servidor HTTP. O log.Fatal irá encerrar a aplicação se o servidor não conseguir iniciar.
-	if err := http.ListenAndServe(addr, handler); err != nil {
-		log.Fatalf("❌ Erro ao iniciar servidor: %v", err)
-	}
+	// Bloqueia até sinal de encerramento
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+	log.Println("\n🛑 Encerrando servidor...")
 }

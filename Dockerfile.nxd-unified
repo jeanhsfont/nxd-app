@@ -7,7 +7,7 @@ COPY web-app/ ./
 RUN npm run build
 
 # Stage 2: Build Backend (Go)
-FROM golang:1.24-bullseye AS builder-backend
+FROM golang:1.24-bookworm AS builder-backend
 WORKDIR /app/backend
 # BUILD_VERSION is injected by cloudbuild.yaml via --build-arg BUILD_VERSION=$BUILD_ID
 # This prevents stale version strings and ensures each build is uniquely identified.
@@ -20,8 +20,8 @@ RUN CGO_ENABLED=1 GOOS=linux go build \
     -ldflags="-X main.BuildVersion=${BUILD_VERSION}" \
     -o nxd-server main.go
 
-# Stage 3: Runtime
-FROM debian:bullseye-slim
+# Stage 3: Runtime (bookworm-slim para glibc compatível com o binário Go buildado em bookworm)
+FROM debian:bookworm-slim
 WORKDIR /root/
 
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 && rm -rf /var/lib/apt/lists/*
