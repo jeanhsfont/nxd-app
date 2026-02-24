@@ -9,11 +9,12 @@ env:
   PROJECT_ID: slideflow-prod
   GCP_PROJECT_NUMBER: 925156909645
   GAR_LOCATION: us-central1
-  SERVICE: hubsystem-backend
+  # Único serviço NXD (não criar hubsystem-backend, hubsystem-frontend, hubsystem-nxd)
+  SERVICE: nxd
   REGION: us-central1
   GCP_SERVICE_ACCOUNT: 925156909645-compute@developer.gserviceaccount.com
   WIF_PROVIDER_RESOURCE: projects/925156909645/locations/global/workloadIdentityPools/nxd-github-pool/providers/nxd-github-provider
-  IMAGE: us-central1-docker.pkg.dev/slideflow-prod/nxd-repo/hubsystem-backend:latest
+  IMAGE: us-central1-docker.pkg.dev/slideflow-prod/nxd-repo/nxd:latest
 
 jobs:
   build-and-deploy:

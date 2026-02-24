@@ -160,13 +160,12 @@ func main() {
 		http.FileServer(http.Dir("./web")).ServeHTTP(w, r)
 	})
 
-	// Configura CORS
+	// Configura CORS — único serviço NXD no Cloud Run
 	c := cors.New(cors.Options{
 		AllowedOrigins: []string{
-			"http://localhost:5173", // Vite Dev
-			"http://localhost:8080", // Local Docker
-			"https://hubsystem-frontend-925156909645.us-central1.run.app", // Cloud Run Frontend
-			"https://hubsystem-nxd-925156909645.us-central1.run.app",     // NXD unificado (SPA servida pelo mesmo serviço)
+			"http://localhost:5173",
+			"http://localhost:8080",
+			"https://nxd-925156909645.us-central1.run.app", // único serviço NXD (SPA + API)
 		},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"*"},

@@ -1,0 +1,28 @@
+
+{
+  "api_key": "NXD_9e6bc1e3deb8a1530a6b0e8c10d6079d216da414f5eab2e26cd04d10ab96eb17",
+  "endpoint": "https://nxd-925156909645.us-central1.run.app/api/ingest",
+  "update_rate_s": 10,
+  "clps": [
+    {
+      "device_id": "CLP-SALA-A-01",
+      "brand": "Siemens",
+      "protocol": "Profinet"
+    },
+    {
+      "device_id": "CLP-SALA-A-02",
+      "brand": "Rockwell",
+      "protocol": "EtherNet/IP"
+    },
+    {
+      "device_id": "CLP-SALA-B-01",
+      "brand": "Schneider",
+      "protocol": "Modbus TCP"
+    },
+    {
+        "device_id": "CLP-SALA-C-01-BACKUP",
+        "brand": "Siemens",
+        "protocol": "Profinet"
+    }
+  ]
+}

@@ -3,36 +3,33 @@ steps:
   #    Usamos $BUILD_ID como tag imutável — cada build tem sua própria imagem.
   #    Isso previne que builds concorrentes sobrescrevam a tag 'latest' e
   #    causem o Cloud Run de fazer deploy de uma versão errada.
+  # Único serviço e imagem: nxd (não hubsystem-backend / hubsystem-frontend / hubsystem-nxd)
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
       - '-f'
       - 'Dockerfile.nxd-unified'
       - '-t'
-      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:$BUILD_ID'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/nxd:$BUILD_ID'
       - '-t'
-      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/nxd:latest'
       - '--build-arg'
       - 'BUILD_VERSION=$BUILD_ID'
       - '.'
 
-  # 2. Enviar a imagem para o Artifact Registry (ambas as tags)
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
       - '--all-tags'
-      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend'
+      - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/nxd'
 
-  # 3. Implantar no Cloud Run usando a tag BUILD_ID imutável
-  #    Isso garante que o Cloud Run sempre faça deploy DESTA build específica,
-  #    independente de outras builds que possam estar rodando em paralelo.
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
       - 'run'
       - 'deploy'
-      - 'hubsystem-backend'
-      - '--image=us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:$BUILD_ID'
+      - 'nxd'
+      - '--image=us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/nxd:$BUILD_ID'
       - '--platform=managed'
       - '--region=us-central1'
       - '--allow-unauthenticated'
@@ -44,5 +41,5 @@ steps:
       - '--max-instances=20'
 
 images:
-  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:$BUILD_ID'
-  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/hubsystem-backend:latest'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/nxd:$BUILD_ID'
+  - 'us-central1-docker.pkg.dev/${PROJECT_ID}/nxd-repo/nxd:latest'
