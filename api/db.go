@@ -70,6 +70,13 @@ func EnsureAuthTables() {
 			two_factor_enabled BOOLEAN DEFAULT FALSE,
 			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 		)`,
+		// Compatibilidade com public.users legada: adiciona colunas se não existirem (Postgres)
+		`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS password_hash TEXT`,
+		`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS full_name TEXT`,
+		`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS cpf TEXT`,
+		`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT FALSE`,
+		`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP`,
+		`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'operador'`,
 		`CREATE TABLE IF NOT EXISTS public.factories (
 			id SERIAL PRIMARY KEY,
 			user_id INTEGER NOT NULL UNIQUE,
