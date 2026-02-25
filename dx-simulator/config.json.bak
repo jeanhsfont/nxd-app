@@ -1,0 +1,22 @@
+{
+  "api_key": "NXD_630094d899fb4c9975e461d8d796a2d58006ef82dac08622cf874368fc4c3d8f",
+  "endpoint": "https://hubsystem-backend-925156909645.us-central1.run.app/api/ingest",
+  "update_rate_s": 3,
+  "clps": [
+    {
+      "device_id": "CLP-VALIDACAO-001",
+      "brand": "Siemens S7-1500",
+      "protocol": "Profinet"
+    },
+    {
+      "device_id": "CLP-VALIDACAO-002",
+      "brand": "Rockwell Allen-Bradley",
+      "protocol": "EtherNet/IP"
+    },
+    {
+      "device_id": "CLP-VALIDACAO-003",
+      "brand": "Schneider M340",
+      "protocol": "Modbus TCP"
+    }
+  ]
+}

@@ -86,6 +86,8 @@ func main() {
 	// Auth - Rotas Públicas
 	router.HandleFunc("/api/register", api.RegisterHandler).Methods("POST")
 	router.HandleFunc("/api/login", api.LoginHandler).Methods("POST")
+	router.HandleFunc("/api/login/2fa", api.Login2FAConfirmHandler).Methods("POST")
+	router.HandleFunc("/api/billing/webhook", api.BillingWebhookHandler).Methods("POST")
 
 	// Rotas Autenticadas via JWT
 	authRouter := router.PathPrefix("/api").Subrouter()
@@ -106,6 +108,8 @@ func main() {
 	authRouter.HandleFunc("/dashboard/data", api.GetDashboardDataHandler).Methods("GET")
 	authRouter.HandleFunc("/ia/chat", api.IAChatHandler).Methods("POST")
 	authRouter.HandleFunc("/ia/analysis", api.ReportIAHandler).Methods("GET")
+	authRouter.HandleFunc("/ia/reports", api.ListIAReportsHandler).Methods("GET")
+	authRouter.HandleFunc("/ia/reports/{id}", api.GetIAReportHandler).Methods("GET")
 	authRouter.HandleFunc("/machine/asset", api.UpdateMachineAssetHandler).Methods("PUT")
 	authRouter.HandleFunc("/report/ia", api.ReportIAHandler).Methods("POST")
 	authRouter.HandleFunc("/machine/delete", api.DeleteMachineHandler).Methods("DELETE")
@@ -116,6 +120,7 @@ func main() {
 	authRouter.HandleFunc("/tag-mappings", api.UpsertTagMappingHandler).Methods("POST")
 	authRouter.HandleFunc("/financial-summary", api.GetFinancialSummaryHandler).Methods("GET")
 	authRouter.HandleFunc("/financial-summary/ranges", api.GetFinancialSummaryRangesHandler).Methods("GET")
+	authRouter.HandleFunc("/financial-summary/export", api.GetFinancialExecutiveExportHandler).Methods("GET")
 	// 2FA TOTP
 	authRouter.HandleFunc("/auth/2fa/setup", api.SetupTOTPHandler).Methods("GET")
 	authRouter.HandleFunc("/auth/2fa/confirm", api.ConfirmTOTPHandler).Methods("POST")
@@ -124,10 +129,13 @@ func main() {
 	// Cobrança e suporte (reais: persistem no banco)
 	authRouter.HandleFunc("/billing/plan", api.GetBillingPlanHandler).Methods("GET")
 	authRouter.HandleFunc("/billing/plan", api.UpdateBillingPlanHandler).Methods("POST")
+	authRouter.HandleFunc("/billing/create-checkout-session", api.CreateCheckoutSessionHandler).Methods("POST")
 	authRouter.HandleFunc("/support", api.CreateSupportTicketHandler).Methods("POST")
 
 	// ─── Admin: Import Jobs ("Download Longo") ────────────────────────────────
 	// All routes require JWT. Factory is inferred from the authenticated user.
+	authRouter.HandleFunc("/me", api.MeHandler).Methods("GET")
+	authRouter.HandleFunc("/admin/audit-log", api.ListAuditLogHandler).Methods("GET")
 	authRouter.HandleFunc("/admin/import-jobs", api.ListImportJobsHandler).Methods("GET")
 	authRouter.HandleFunc("/admin/import-jobs", api.CreateImportJobHandler).Methods("POST")
 	authRouter.HandleFunc("/admin/import-jobs/{id}", api.GetImportJobHandler).Methods("GET")

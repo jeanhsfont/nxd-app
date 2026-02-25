@@ -1,67 +1,77 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { CheckCircle, LayoutDashboard } from 'lucide-react';
+import { CheckCircle, LayoutDashboard, ArrowRight, Zap } from 'lucide-react';
 import api from '../utils/api';
 
-/**
- * Tela de "momento de conexão" após onboarding. Reforça que a fábrica foi conectada
- * e a API Key foi gerada; direciona para o dashboard.
- * Se o usuário já tem telemetria/ativos (acessou /welcome dias depois), redireciona para /.
- */
 export default function Welcome() {
   const navigate = useNavigate();
   const [ready, setReady] = useState(false);
 
-  // Já tem dados? Redireciona para dashboard (evita página órfã). Usa api (axios) para 401 cair no interceptor.
-  // Request vai para baseURL + path; com baseURL '/' ou origem completa fica exatamente /api/dashboard/data.
   useEffect(() => {
     const token = localStorage.getItem('nxd-token');
     if (!token) {
       setReady(true);
       return;
     }
-    let cancelled = false;
     api.get('/api/dashboard/data')
       .then((res) => {
-        if (cancelled) return;
-        const data = res.data;
-        const hasAssets = data?.total_assets > 0 || (data?.assets?.length ?? 0) > 0;
-        if (hasAssets) {
-          navigate('/', { replace: true });
-          return;
-        }
-        setReady(true);
+        const hasAssets = res.data?.total_assets > 0;
+        if (hasAssets) navigate('/', { replace: true });
+        else setReady(true);
       })
-      .catch(() => {
-        if (!cancelled) setReady(true);
-      });
-    return () => { cancelled = true; };
+      .catch(() => setReady(true));
   }, [navigate]);
 
   if (!ready) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Carregando…</p>
+        <div className="spinner"></div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4">
-      <div className="max-w-md w-full text-center">
-        <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-emerald-100 border border-emerald-200 mb-6">
-          <CheckCircle className="w-10 h-10 text-emerald-600" aria-hidden="true" />
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="max-w-2xl w-full text-center fade-in">
+        <div className="inline-flex items-center justify-center w-20 h-20 bg-navy rounded-xl mb-6">
+          <CheckCircle className="w-10 h-10 text-white" />
         </div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Fábrica conectada com sucesso</h1>
-        <p className="text-gray-600 text-sm mb-8">
-          Sua chave de API foi gerada. Aguardando primeira telemetria dos seus CLPs. Quando os dados chegarem, eles aparecerão no dashboard.
+
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">
+          Fábrica conectada
+        </h1>
+        <p className="text-gray-600 text-lg mb-2">
+          Sua chave de API foi gerada com sucesso.
         </p>
-        <Link
-          to="/"
-          className="inline-flex items-center justify-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-        >
-          <LayoutDashboard className="w-5 h-5" />
-          Ir para Dashboard
+        <p className="text-navy font-semibold mb-8">
+          Em poucos minutos você pode ver seu primeiro ROI no painel de indicadores financeiros.
+        </p>
+
+        <div className="nxd-card max-w-xl mx-auto mb-8 text-left">
+          <h3 className="text-gray-900 font-semibold mb-4 text-lg">Próximos Passos</h3>
+          <div className="space-y-3">
+            {[
+              'Vá em Configurações e copie sua API Key',
+              'Configure no DX Simulator',
+              'Inicie o envio de telemetria',
+              'Acompanhe dados em tempo real no Dashboard'
+            ].map((step, i) => (
+              <div key={i} className="flex items-center gap-3 text-gray-700">
+                <div className="w-7 h-7 bg-navy rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                  {i + 1}
+                </div>
+                <span>{step}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <Link to="/">
+          <button className="nxd-btn nxd-btn-primary">
+            <LayoutDashboard className="w-5 h-5" />
+            Ir para Dashboard
+            <ArrowRight className="w-5 h-5" />
+          </button>
         </Link>
       </div>
     </div>

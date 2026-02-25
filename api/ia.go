@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"hubsystem/internal/nxd/store"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/mux"
 	"google.golang.org/genai"
 )
 
@@ -25,6 +27,7 @@ type ChatRequest struct {
 type ChatResponse struct {
 	Reply   string `json:"reply"`
 	Sources string `json:"sources,omitempty"`
+	ReportID int64 `json:"report_id,omitempty"`
 }
 
 // IAChatHandler — POST /api/ia/chat
@@ -58,8 +61,22 @@ func IAChatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sources := buildSourcesSummary(req.SectorID, "Telemetria e indicadores financeiros (24h, 7d)")
+	var reportID int64
+	if db := GetDB(); db != nil {
+		title := req.Message
+		if len(title) > 80 {
+			title = title[:80] + "..."
+		}
+		factoryIDStr := ""
+		if fid, err := getFactoryIDForUser(userID); err == nil {
+			factoryIDStr = fid.String()
+		}
+		reportID, _ = saveIAReport(db, userID, factoryIDStr, title, reply, sources)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ChatResponse{Reply: reply})
+	json.NewEncoder(w).Encode(ChatResponse{Reply: reply, Sources: sources, ReportID: reportID})
 }
 
 // buildTelemetryContext monta um resumo dos dados reais do banco para o prompt da IA
@@ -283,4 +300,104 @@ Diretrizes:
 	}
 
 	return strings.TrimSpace(result.Text()), nil
+}
+
+func buildSourcesSummary(sectorID, baseDesc string) string {
+	if sectorID != "" {
+		return baseDesc + " Setor filtrado: " + sectorID + "."
+	}
+	return baseDesc + "."
+}
+
+func saveIAReport(db *sql.DB, userID int64, factoryID, title, textContent, sources string) (int64, error) {
+	if db == nil {
+		return 0, nil
+	}
+	var id int64
+	err := db.QueryRow(`
+		INSERT INTO ia_reports (user_id, factory_id, title, text_content, sources_json) VALUES ($1, $2, $3, $4, $5)
+		RETURNING id
+	`, userID, factoryID, title, textContent, sources).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// ListIAReportsHandler — GET /api/ia/reports — lista relatórios/análises do usuário.
+func ListIAReportsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, ok := r.Context().Value("userID").(int64)
+	if !ok {
+		http.Error(w, "Não autenticado", http.StatusUnauthorized)
+		return
+	}
+	db := GetDB()
+	if db == nil {
+		http.Error(w, "Indisponível", http.StatusServiceUnavailable)
+		return
+	}
+	rows, err := db.Query(`
+		SELECT id, title, sources_json, created_at FROM ia_reports WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50
+	`, userID)
+	if err != nil {
+		http.Error(w, "Erro ao listar relatórios", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	type row struct {
+		ID        int64     `json:"id"`
+		Title     string    `json:"title"`
+		Sources   string    `json:"sources"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	var list []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.ID, &r.Title, &r.Sources, &r.CreatedAt); err == nil {
+			list = append(list, r)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"reports": list})
+}
+
+// GetIAReportHandler — GET /api/ia/reports/:id — retorna um relatório por id.
+func GetIAReportHandler(w http.ResponseWriter, r *http.Request) {
+	userID, ok := r.Context().Value("userID").(int64)
+	if !ok {
+		http.Error(w, "Não autenticado", http.StatusUnauthorized)
+		return
+	}
+	idStr := mux.Vars(r)["id"]
+	if idStr == "" {
+		http.Error(w, "id obrigatório", http.StatusBadRequest)
+		return
+	}
+	var id int64
+	if _, err := fmt.Sscanf(idStr, "%d", &id); err != nil {
+		http.Error(w, "id inválido", http.StatusBadRequest)
+		return
+	}
+	db := GetDB()
+	if db == nil {
+		http.Error(w, "Indisponível", http.StatusServiceUnavailable)
+		return
+	}
+	var title, textContent, sources string
+	var createdAt time.Time
+	err := db.QueryRow(`
+		SELECT title, text_content, sources_json, created_at FROM ia_reports WHERE id = $1 AND user_id = $2
+	`, id, userID).Scan(&title, &textContent, &sources, &createdAt)
+	if err != nil {
+		http.Error(w, "Relatório não encontrado", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"id":          id,
+		"title":       title,
+		"analysis":    textContent,
+		"sources":     sources,
+		"created_at":  createdAt.Format(time.RFC3339),
+	})
 }

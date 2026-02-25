@@ -20,7 +20,8 @@ func init() {
 }
 
 type Claims struct {
-	UserID int64 `json:"user_id"`
+	UserID  int64  `json:"user_id"`
+	Purpose string `json:"purpose,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -56,6 +57,10 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 		if !token.Valid {
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+		if claims.Purpose == "2fa_pending" {
+			http.Error(w, "Token temporário. Conclua o login com o código 2FA.", http.StatusUnauthorized)
 			return
 		}
 

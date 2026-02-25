@@ -33,6 +33,10 @@ func ListImportJobsHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !userHasRole(userID, "admin") {
+		http.Error(w, "Acesso negado", http.StatusForbidden)
+		return
+	}
 	factoryID, err := getFactoryIDForUser(userID)
 	if err != nil || factoryID == uuid.Nil {
 		http.Error(w, "factory not found", http.StatusNotFound)
@@ -83,6 +87,10 @@ func CreateImportJobHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value("userID").(int64)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !userHasRole(userID, "admin") {
+		http.Error(w, "Acesso negado", http.StatusForbidden)
 		return
 	}
 	factoryID, err := getFactoryIDForUser(userID)
@@ -170,6 +178,10 @@ func GetImportJobHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !userHasRole(userID, "admin") {
+		http.Error(w, "Acesso negado", http.StatusForbidden)
+		return
+	}
 	factoryID, err := getFactoryIDForUser(userID)
 	if err != nil || factoryID == uuid.Nil {
 		http.Error(w, "factory not found", http.StatusNotFound)
@@ -209,6 +221,10 @@ func CancelImportJobHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
+	if !userHasRole(userID, "admin") {
+		http.Error(w, "Acesso negado", http.StatusForbidden)
+		return
+	}
 	factoryID, err := getFactoryIDForUser(userID)
 	if err != nil || factoryID == uuid.Nil {
 		http.Error(w, "factory not found", http.StatusNotFound)
@@ -246,6 +262,10 @@ func RetryImportJobHandler(w http.ResponseWriter, r *http.Request) {
 	userID, ok := r.Context().Value("userID").(int64)
 	if !ok {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if !userHasRole(userID, "admin") {
+		http.Error(w, "Acesso negado", http.StatusForbidden)
 		return
 	}
 	factoryID, err := getFactoryIDForUser(userID)

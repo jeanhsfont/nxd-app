@@ -11,8 +11,11 @@ NXD_OPS_KIT/
 ├── config/
 │   └── ops.env.example    # Template de configuração
 ├── ps/
-│   ├── _lib.ps1           # Biblioteca comum
-│   └── deploy_nxd_vm.ps1  # Deploy em VM (Compute Engine)
+│   ├── _lib.ps1                 # Biblioteca comum
+│   ├── deploy_nxd_vm.ps1       # Deploy em VM (Compute Engine)
+│   ├── setup_gcloud_apis.ps1   # Ativar APIs no projeto
+│   ├── list_and_clean_nxd_hub.ps1  # Listar/remover só recursos NXD/Hub (não mexe em Slideflow)
+│   └── create_nxd_sql_and_secrets.ps1  # Criar Cloud SQL (nxd-sql-instance) + secrets para deploy
 └── README.md              # Este arquivo
 ```
 
@@ -62,6 +65,44 @@ gcloud auth login
 ---
 
 ## 🔧 Scripts Disponíveis
+
+### `list_and_clean_nxd_hub.ps1`
+Lista recursos GCP (Cloud Run, VMs, Cloud SQL) com nome **NXD** ou **Hub System** e, opcionalmente, remove só os serviços Cloud Run. **Não altera nada que contenha "Slideflow".**
+
+**Parâmetros:**
+- `-ProjectId`: projeto GCP (ex.: `slideflow-prod`); senão usa `config\ops.env` ou `gcloud config`
+- `-Region`: região Cloud Run (padrão: `us-central1`)
+- `-DeleteRun`: remove os serviços Cloud Run listados como NXD/Hub
+- `-DeleteSql`: remove as instâncias Cloud SQL cujo nome contém NXD/Hub (apaga o banco por completo)
+- `-WhatIf`: só mostra o que seria deletado (com `-DeleteRun` ou `-DeleteSql`)
+
+**Exemplos:**
+```powershell
+# Só listar
+.\ps\list_and_clean_nxd_hub.ps1 -ProjectId slideflow-prod
+
+# Remover serviços Cloud Run NXD/Hub
+.\ps\list_and_clean_nxd_hub.ps1 -ProjectId slideflow-prod -DeleteRun
+
+# Remover instâncias Cloud SQL NXD/Hub (zera/apaga os bancos)
+.\ps\list_and_clean_nxd_hub.ps1 -ProjectId slideflow-prod -DeleteSql
+```
+
+Requer `gcloud` instalado e autenticado (`gcloud auth login`). Limpeza do banco (Cloud SQL): veja `docs\LIMPEZA_GCP_NXD_HUB.md`.
+
+---
+
+### `create_nxd_sql_and_secrets.ps1`
+Cria a instância Cloud SQL **nxd-sql-instance**, o database **nxd**, e os secrets **NXD_DATABASE_URL** e **JWT_SECRET_NXD** no projeto. Use depois de ter removido os recursos NXD antigos e antes de dar push na main para o deploy.
+
+**Exemplo:**
+```powershell
+.\ps\create_nxd_sql_and_secrets.ps1 -ProjectId slideflow-prod
+```
+
+Depois: `git push origin main` para disparar o workflow e subir o NXD em um único site (Cloud Run). Guia completo: `docs\NXD_DEPLOY_E_DEMO.md`.
+
+---
 
 ### `deploy_nxd_vm.ps1`
 Deploy completo do NXD em VM do Google Compute Engine.

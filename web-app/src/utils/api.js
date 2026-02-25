@@ -1,9 +1,16 @@
 import axios from 'axios';
 
+// Backend Go (HubSystem1.0): use REACT_APP_BACKEND_URL ou deixe vazio para mesmo host
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/',
+  baseURL: BACKEND_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
+// Request interceptor para adicionar token
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('nxd-token');
@@ -15,32 +22,22 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Guard: evita duplo redirect quando várias requisições recebem 401 em paralelo
-let handling401 = false;
-
-// Tratamento global de token expirado (401) — enterprise
-// Ordem obrigatória: 1) hadToken (antes de removeItem) 2) early return 3) removeItem 4) toast 5) redirect
-// Só faz fluxo "sessão expirada" se havia token (evita false positive em /terms, /support, etc.)
+// Response interceptor para tratar erros de autenticação
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status !== 401) return Promise.reject(error);
-
-    const hadToken = !!localStorage.getItem('nxd-token');
-    if (!hadToken) return Promise.reject(error);
-
-    const currentPath = window.location.pathname;
-    const isAuthPage = currentPath === '/login' || currentPath === '/register';
-    if (isAuthPage) return Promise.reject(error);
-
-    if (handling401) return Promise.reject(error);
-    handling401 = true;
-
-    localStorage.removeItem('nxd-token');
-    try {
-      sessionStorage.setItem('nxd_session_expired_toast', '1');
-    } catch (_) {}
-    window.location.replace('/login?reason=session_expired');
+    if (error.response?.status === 401) {
+      // Token expirado ou inválido
+      localStorage.removeItem('nxd-token');
+      
+      // Marca no sessionStorage para mostrar toast
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem('nxd_session_expired_toast', 'true');
+      }
+      
+      // Redireciona para login
+      window.location.href = '/login?reason=session_expired';
+    }
     return Promise.reject(error);
   }
 );

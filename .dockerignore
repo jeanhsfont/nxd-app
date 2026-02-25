@@ -3,9 +3,10 @@
 node_modules
 web-app/node_modules
 web-app/dist
-create_user.go
-get_key.go
+.claude
+*.exe
+cloud-sql-proxy*
 README.md
-Dockerfile
 firebase.json
 .firebaserc
+

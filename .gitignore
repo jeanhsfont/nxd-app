@@ -36,3 +36,12 @@ dist/
 
 # Docker
 docker-compose.override.yml
+
+# Embedded repos / worktrees (não subir como conteúdo)
+.claude/
+nxd-frontend-clone/
+
+# Arquivos grandes (limite GitHub 100 MB)
+dx-simulator/kaggle-data/
+nxd-site-telas-completo.zip
+nxd-telas-export.zip

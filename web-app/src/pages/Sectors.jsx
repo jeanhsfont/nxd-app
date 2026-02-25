@@ -1,45 +1,46 @@
 import React, { useState, useEffect } from 'react';
 import api from '../utils/api';
-import { Plus, Trash2, Edit } from 'lucide-react';
+import { Plus, Trash2, Edit, Package, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import ConfirmationModal from '../components/ConfirmationModal';
 import EditSectorModal from '../components/EditSectorModal';
 
 function Sectors() {
   const [sectors, setSectors] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [newSectorName, setNewSectorName] = useState('');
   const [newSectorDescription, setNewSectorDescription] = useState('');
+  const [creating, setCreating] = useState(false);
   
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [sectorToDelete, setSectorToDelete] = useState(null);
-
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [sectorToEdit, setSectorToEdit] = useState(null);
 
   useEffect(() => {
-    const fetchSectors = async () => {
-      try {
-        const response = await api.get('/api/sectors');
-        setSectors(response.data.sectors || []);
-      } catch (err) {
-        setError('Não foi possível carregar os setores.');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchSectors();
   }, []);
+
+  const fetchSectors = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/api/sectors');
+      setSectors(Array.isArray(response.data) ? response.data : (response.data?.sectors || []));
+    } catch (err) {
+      toast.error('Não foi possível carregar os setores');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleCreateSector = async (e) => {
     e.preventDefault();
     if (!newSectorName.trim()) {
-      alert('O nome do setor é obrigatório.');
+      toast.error('O nome do setor é obrigatório');
       return;
     }
 
+    setCreating(true);
     try {
       const response = await api.post('/api/sectors', {
         name: newSectorName,
@@ -48,9 +49,11 @@ function Sectors() {
       setSectors([...sectors, response.data]);
       setNewSectorName('');
       setNewSectorDescription('');
+      toast.success('Setor criado com sucesso!');
     } catch (err) {
-      setError('Não foi possível criar o setor.');
-      console.error(err);
+      toast.error('Não foi possível criar o setor');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -59,160 +62,168 @@ function Sectors() {
     setIsDeleteModalOpen(true);
   };
 
-  const closeDeleteModal = () => {
-    setSectorToDelete(null);
-    setIsDeleteModalOpen(false);
-  };
-
   const handleDeleteSector = async () => {
     if (!sectorToDelete) return;
 
     try {
       await api.delete(`/api/sectors/${sectorToDelete.id}`);
       setSectors(sectors.filter((s) => s.id !== sectorToDelete.id));
-      closeDeleteModal();
+      toast.success('Setor excluído!');
+      setIsDeleteModalOpen(false);
     } catch (err) {
-      setError('Não foi possível excluir o setor.');
-      console.error(err);
-      closeDeleteModal();
+      toast.error('Não foi possível excluir o setor');
     }
-  };
-
-  const openEditModal = (sector) => {
-    setSectorToEdit(sector);
-    setIsEditModalOpen(true);
-  };
-
-  const closeEditModal = () => {
-    setSectorToEdit(null);
-    setIsEditModalOpen(false);
   };
 
   const handleUpdateSector = async (updatedSector) => {
     try {
       const response = await api.put(`/api/sectors/${updatedSector.id}`, updatedSector);
-      setSectors(
-        sectors.map((s) => (s.id === updatedSector.id ? response.data : s))
-      );
-      closeEditModal();
+      setSectors(sectors.map((s) => (s.id === updatedSector.id ? response.data : s)));
+      setIsEditModalOpen(false);
+      toast.success('Setor atualizado!');
     } catch (err) {
-      setError('Não foi possível atualizar o setor.');
-      console.error(err);
-      closeEditModal();
+      toast.error('Não foi possível atualizar o setor');
     }
   };
 
-  if (loading) {
-    return <div className="container mx-auto p-4">Carregando...</div>;
-  }
-
-  if (error) {
-    return <div className="container mx-auto p-4 text-red-500">{error}</div>;
-  }
-
   return (
     <>
-      <div className="container mx-auto p-8">
-        <h1 className="text-3xl font-bold mb-6">Gestão de Setores</h1>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {/* Formulário de Criação */}
-          <div className="md:col-span-1">
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h2 className="text-xl font-semibold mb-4">Criar Novo Setor</h2>
-              <form onSubmit={handleCreateSector} className="space-y-4">
-                <div>
-                  <label htmlFor="sectorName" className="block text-sm font-medium text-gray-700">
-                    Nome do Setor
-                  </label>
-                  <input
-                    type="text"
-                    id="sectorName"
-                    value={newSectorName}
-                    onChange={(e) => setNewSectorName(e.target.value)}
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                    placeholder="Ex: Usinagem"
-                    required
-                  />
-                </div>
-                <div>
-                  <label htmlFor="sectorDescription" className="block text-sm font-medium text-gray-700">
-                    Descrição (Opcional)
-                  </label>
-                  <textarea
-                    id="sectorDescription"
-                    value={newSectorDescription}
-                    onChange={(e) => setNewSectorDescription(e.target.value)}
-                    rows="3"
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                    placeholder="Descreva brevemente a função deste setor"
-                  ></textarea>
-                </div>
-                <button
-                  type="submit"
-                  className="w-full flex justify-center items-center gap-2 px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                >
-                  <Plus className="w-5 h-5" />
-                  Criar Setor
-                </button>
-              </form>
+      <div className="min-h-screen bg-gray-50">
+        <div className="max-w-6xl mx-auto p-6">
+          {/* Header */}
+          <div className="page-header">
+            <div className="page-header-icon">
+              <Package className="w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="page-title">Gestão de Setores</h1>
+              <p className="page-subtitle">Organize suas máquinas por setores</p>
             </div>
           </div>
 
-          {/* Lista de Setores */}
-          <div className="md:col-span-2">
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h2 className="text-xl font-semibold mb-4">Setores Existentes</h2>
-              {sectors.length === 0 ? (
-                <p className="text-gray-500">Nenhum setor criado ainda.</p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Create form */}
+            <div className="lg:col-span-1">
+              <div className="nxd-card sticky top-6">
+                <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+                  <Plus className="w-5 h-5 text-green" />
+                  Criar Novo Setor
+                </h2>
+                <form onSubmit={handleCreateSector} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Nome do Setor
+                    </label>
+                    <input
+                      type="text"
+                      value={newSectorName}
+                      onChange={(e) => setNewSectorName(e.target.value)}
+                      className="nxd-input"
+                      placeholder="Ex: Usinagem"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Descrição (Opcional)
+                    </label>
+                    <textarea
+                      value={newSectorDescription}
+                      onChange={(e) => setNewSectorDescription(e.target.value)}
+                      rows="3"
+                      className="nxd-input resize-none"
+                      placeholder="Breve descrição do setor"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={creating}
+                    className="nxd-btn nxd-btn-primary w-full justify-center"
+                  >
+                    {creating ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Criando...
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-5 h-5" />
+                        Criar Setor
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            {/* Sectors List */}
+            <div className="lg:col-span-2">
+              {loading ? (
+                <div className="text-center py-12">
+                  <div className="spinner mx-auto mb-4"></div>
+                  <p className="text-gray-600">Carregando setores...</p>
+                </div>
+              ) : sectors.length === 0 ? (
+                <div className="nxd-card text-center py-12">
+                  <Package className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">Nenhum setor cadastrado</h3>
+                  <p className="text-gray-600">Crie seu primeiro setor para organizar os ativos</p>
+                </div>
               ) : (
-                <ul className="space-y-3">
+                <div className="space-y-4">
                   {sectors.map((sector) => (
-                    <li
-                      key={sector.id}
-                      className="flex items-center justify-between bg-gray-50 p-4 rounded-md border"
-                    >
-                      <div>
-                        <p className="font-semibold text-gray-800">{sector.name}</p>
-                        {sector.description && (
-                          <p className="text-sm text-gray-600">{sector.description}</p>
-                        )}
+                    <div key={sector.id} className="nxd-card fade-in">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <h3 className="text-lg font-bold text-gray-900 mb-1">{sector.name}</h3>
+                          {sector.description && (
+                            <p className="text-gray-600 text-sm">{sector.description}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setSectorToEdit(sector);
+                              setIsEditModalOpen(true);
+                            }}
+                            className="p-2 text-navy hover:bg-navy/10 rounded-lg transition-colors"
+                            title="Editar"
+                          >
+                            <Edit className="w-5 h-5" />
+                          </button>
+                          <button
+                            onClick={() => openDeleteModal(sector)}
+                            className="p-2 text-red hover:bg-red/10 rounded-lg transition-colors"
+                            title="Excluir"
+                          >
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <button 
-                          onClick={() => openEditModal(sector)}
-                          className="text-gray-400 hover:text-indigo-600"
-                        >
-                          <Edit className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={() => openDeleteModal(sector)}
-                          className="text-gray-400 hover:text-red-600"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </li>
+                    </div>
                   ))}
-                </ul>
+                </div>
               )}
             </div>
           </div>
         </div>
       </div>
-      <ConfirmationModal
-        isOpen={isDeleteModalOpen}
-        onClose={closeDeleteModal}
-        onConfirm={handleDeleteSector}
-        title="Confirmar Exclusão"
-        message={`Tem certeza que deseja excluir o setor "${sectorToDelete?.name}"? Esta ação não pode ser desfeita.`}
-      />
-      <EditSectorModal
-        isOpen={isEditModalOpen}
-        onClose={closeEditModal}
-        onSave={handleUpdateSector}
-        sector={sectorToEdit}
-      />
+
+      {/* Modals */}
+      {isDeleteModalOpen && (
+        <ConfirmationModal
+          title="Excluir Setor"
+          message={`Tem certeza que deseja excluir o setor "${sectorToDelete?.name}"?`}
+          onConfirm={handleDeleteSector}
+          onCancel={() => setIsDeleteModalOpen(false)}
+        />
+      )}
+      {isEditModalOpen && sectorToEdit && (
+        <EditSectorModal
+          sector={sectorToEdit}
+          onSave={handleUpdateSector}
+          onClose={() => setIsEditModalOpen(false)}
+        />
+      )}
     </>
   );
 }

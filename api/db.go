@@ -82,6 +82,9 @@ func EnsureAuthTables() {
 		)`,
 		`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'free'`,
 		`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS next_billing_date DATE`,
+		`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active'`,
+		`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS gateway_subscription_id TEXT`,
+		`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP WITH TIME ZONE`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			log.Printf("[EnsureAuthTables] %v", err)
@@ -251,6 +254,9 @@ func ensureBillingAndSupportTables(driverName string) error {
 		for _, q := range []string{
 			`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT 'free'`,
 			`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS next_billing_date DATE`,
+			`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'active'`,
+			`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS gateway_subscription_id TEXT`,
+			`ALTER TABLE public.factories ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP WITH TIME ZONE`,
 		} {
 			if _, err := db.Exec(q); err != nil {
 				log.Printf("⚠️  Billing migration (ignorável se já existe): %v", err)
@@ -288,5 +294,72 @@ func ensureBillingAndSupportTables(driverName string) error {
 		}
 	}
 	log.Println("✓ Migração cobrança e suporte executada.")
+	return ensureAuditLogAndRoleTables(driverName)
+}
+
+func ensureAuditLogAndRoleTables(driverName string) error {
+	if driverName == "postgres" {
+		for _, q := range []string{
+			`CREATE TABLE IF NOT EXISTS public.audit_log (
+				id BIGSERIAL PRIMARY KEY,
+				user_id BIGINT NOT NULL,
+				action TEXT NOT NULL,
+				entity_type TEXT NOT NULL,
+				entity_id TEXT,
+				old_value TEXT,
+				new_value TEXT,
+				ip TEXT,
+				created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+			)`,
+			`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'operador'`,
+		} {
+			if _, err := db.Exec(q); err != nil {
+				log.Printf("⚠️  audit/role migration: %v", err)
+			}
+		}
+	} else {
+		_, _ = db.Exec(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'operador'`)
+		_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			action TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			entity_id TEXT,
+			old_value TEXT,
+			new_value TEXT,
+			ip TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`)
+	}
+	log.Println("✓ Migração audit_log e role executada.")
+	return ensureIAReportsTable(driverName)
+}
+
+func ensureIAReportsTable(driverName string) error {
+	if driverName == "postgres" {
+		_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS public.ia_reports (
+			id BIGSERIAL PRIMARY KEY,
+			user_id BIGINT NOT NULL,
+			factory_id TEXT,
+			title TEXT NOT NULL,
+			text_content TEXT NOT NULL,
+			sources_json TEXT,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+		)`)
+	} else {
+		_, _ = db.Exec(`
+		CREATE TABLE IF NOT EXISTS ia_reports (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			factory_id TEXT,
+			title TEXT NOT NULL,
+			text_content TEXT NOT NULL,
+			sources_json TEXT,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)`)
+	}
+	log.Println("✓ Migração ia_reports executada.")
 	return nil
 }

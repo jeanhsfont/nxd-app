@@ -1,97 +1,134 @@
 import React, { useState } from 'react';
-
-const CopyIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-  </svg>
-);
+import { AlertTriangle, Copy, CheckCircle } from 'lucide-react';
+import api from '../utils/api';
 
 export default function RegenerateKeyModal({ onClose }) {
-  const [newApiKey, setNewApiKey] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [hasAcknowledged, setHasAcknowledged] = useState(false);
-  const [copySuccess, setCopySuccess] = useState('');
+  const [step, setStep] = useState('confirm'); // 'confirm' | 'generated'
+  const [newKey, setNewKey] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
 
-  const handleRegenerateKey = async () => {
-    setIsLoading(true);
+  const handleRegenerate = async () => {
+    setLoading(true);
     setError('');
-    setCopySuccess('');
     try {
-      const token = localStorage.getItem('nxd-token');
-      const response = await fetch('/api/factory/regenerate-api-key', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error('Falha ao gerar a nova chave. Tente novamente.');
-      }
-      const data = await response.json();
-      setNewApiKey(data.api_key);
+      const response = await api.post('/api/factory/regenerate-api-key');
+      setNewKey(response.data.apiKey || response.data.api_key);
+      setStep('generated');
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.error || 'Erro ao gerar nova chave. Tente novamente.');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(newApiKey);
-    setCopySuccess('Chave copiada para a área de transferência!');
-    setTimeout(() => setCopySuccess(''), 2000);
+    navigator.clipboard.writeText(newKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" role="dialog" aria-modal="true" aria-labelledby="regen-modal-title">
-      <div className="p-8 bg-white rounded-xl shadow-2xl w-full max-w-lg border border-gray-200">
-        <h1 id="regen-modal-title" className="text-2xl font-bold mb-4 text-red-600">Atenção: Regenerar Chave de API</h1>
-        <p className="text-gray-600 mb-4">
-          Você está prestes a invalidar sua chave de API atual. Todos os sistemas que a utilizam deixarão de funcionar até que sejam atualizados com a nova chave.
-        </p>
-        
-        {newApiKey ? (
-          <>
-            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 mb-4 rounded-md">
-              <p className="font-bold">Esta é a sua nova chave. Anote-a em um lugar seguro.</p>
-              <p>Por motivos de segurança, esta é a única vez que a chave será exibida.</p>
+  if (step === 'generated') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-lg mx-4">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 rounded-xl bg-green-100 flex items-center justify-center">
+              <CheckCircle className="w-6 h-6 text-green-600" />
             </div>
-            <div className="relative mb-4">
-              <input type="text" readOnly value={newApiKey} className="w-full px-3 py-2 bg-gray-100 border rounded-lg pr-10" />
-              <button type="button" onClick={handleCopy} className="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-800" aria-label="Copiar chave">
-                <CopyIcon />
-              </button>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Nova API Key Gerada!</h2>
+              <p className="text-sm text-gray-500">Copie e guarde em local seguro</p>
             </div>
-            {copySuccess && <p className="text-green-600 text-sm mb-4" role="status" aria-live="polite">{copySuccess}</p>}
-            <div className="flex justify-end">
-              <button type="button" onClick={onClose} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg">
-                Fechar
-              </button>
+          </div>
+
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-yellow-800">
+              <p className="font-semibold mb-1">Importante!</p>
+              <p>Sua chave anterior foi invalidada. Esta nova chave será exibida apenas uma vez.</p>
             </div>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center mb-6">
-              <input type="checkbox" id="ack-regen-check" className="mr-2" checked={hasAcknowledged} onChange={(e) => setHasAcknowledged(e.target.checked)} />
-              <label htmlFor="ack-regen-check" className="text-sm text-gray-700">
-                Eu entendo que minha chave de API atual será permanentemente invalidada e que esta nova chave não poderá ser vista novamente após fechar esta janela.
-              </label>
-            </div>
-            {error && <p className="text-red-600 text-sm mb-4 p-2 bg-red-50 border border-red-200 rounded-lg" role="alert">{error}</p>}
-            <div className="flex justify-between items-center gap-3">
-              <button type="button" onClick={onClose} className="bg-gray-500 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded-lg">
-                Cancelar
-              </button>
+          </div>
+
+          <div className="bg-gray-900 rounded-lg p-4 mb-6">
+            <p className="text-xs text-gray-400 mb-2">Nova API Key:</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-sm text-white font-mono break-all">{newKey}</code>
               <button
-                type="button"
-                onClick={handleRegenerateKey}
-                disabled={!hasAcknowledged || isLoading}
-                className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleCopy}
+                className="flex-shrink-0 bg-gray-700 hover:bg-gray-600 text-white px-3 py-2 rounded-lg flex items-center gap-2 transition-colors"
               >
-                {isLoading ? 'Gerando...' : 'Invalidar Chave Antiga e Gerar Nova'}
+                {copied ? (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    <span className="text-xs">Copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span className="text-xs">Copiar</span>
+                  </>
+                )}
               </button>
             </div>
-          </>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+          >
+            Fechar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-lg mx-4">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center">
+            <AlertTriangle className="w-6 h-6 text-red-600" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Gerar Nova API Key?</h2>
+            <p className="text-sm text-gray-500">Ação irreversível</p>
+          </div>
+        </div>
+
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-red-800 font-medium mb-2">Atenção:</p>
+          <ul className="text-sm text-red-700 space-y-1 list-disc list-inside">
+            <li>Sua API Key atual será <strong>invalidada permanentemente</strong></li>
+            <li>Todos os dispositivos conectados perderão acesso</li>
+            <li>Você precisará reconfigurar todos os dispositivos com a nova chave</li>
+          </ul>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            {error}
+          </div>
         )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-3 px-4 rounded-lg transition-colors"
+            disabled={loading}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleRegenerate}
+            disabled={loading}
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Gerando...' : 'Sim, gerar nova chave'}
+          </button>
+        </div>
       </div>
     </div>
   );

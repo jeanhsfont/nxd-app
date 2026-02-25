@@ -1,42 +1,378 @@
-#root {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+/* ==================== NXD - DESIGN SYSTEM CORPORATIVO ==================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  /* Cores principais */
+  --nxd-navy: #1e3a8a;
+  --nxd-navy-dark: #1e40af;
+  --nxd-navy-light: #3b82f6;
+  
+  /* Status */
+  --nxd-green: #16a34a;
+  --nxd-green-light: #22c55e;
+  --nxd-red: #dc2626;
+  --nxd-red-light: #ef4444;
+  
+  /* Neutros */
+  --nxd-white: #ffffff;
+  --nxd-gray-50: #f9fafb;
+  --nxd-gray-100: #f3f4f6;
+  --nxd-gray-200: #e5e7eb;
+  --nxd-gray-300: #d1d5db;
+  --nxd-gray-400: #9ca3af;
+  --nxd-gray-500: #6b7280;
+  --nxd-gray-600: #4b5563;
+  --nxd-gray-700: #374151;
+  --nxd-gray-800: #1f2937;
+  --nxd-gray-900: #111827;
+  
+  /* Sombras sutis */
+  --nxd-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --nxd-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  --nxd-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --nxd-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  
+  /* Transições */
+  --nxd-transition: 150ms ease-in-out;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
-@keyframes logo-spin {
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--nxd-white);
+  color: var(--nxd-gray-900);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar limpa */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--nxd-gray-100);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--nxd-gray-300);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--nxd-gray-400);
+}
+
+/* Card padrão */
+.nxd-card {
+  background: var(--nxd-white);
+  border: 1px solid var(--nxd-gray-200);
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: var(--nxd-shadow-sm);
+  transition: all var(--nxd-transition);
+}
+
+.nxd-card:hover {
+  box-shadow: var(--nxd-shadow-md);
+  border-color: var(--nxd-gray-300);
+}
+
+/* Botão primário */
+.nxd-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  transition: all var(--nxd-transition);
+}
+
+.nxd-btn-primary {
+  background: var(--nxd-navy);
+  color: white;
+}
+
+.nxd-btn-primary:hover {
+  background: var(--nxd-navy-dark);
+  box-shadow: var(--nxd-shadow-md);
+}
+
+.nxd-btn-primary:disabled {
+  background: var(--nxd-gray-300);
+  cursor: not-allowed;
+}
+
+.nxd-btn-secondary {
+  background: var(--nxd-gray-200);
+  color: var(--nxd-gray-800);
+}
+
+.nxd-btn-secondary:hover:not(:disabled) {
+  background: var(--nxd-gray-300);
+}
+
+.nxd-btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Input padrão — altura fixa e line-height para alinhar texto com ícones */
+.nxd-input {
+  width: 100%;
+  padding: 0 16px;
+  background: var(--nxd-white);
+  border: 1px solid var(--nxd-gray-300);
+  border-radius: 6px;
+  color: var(--nxd-gray-900);
+  font-size: 14px;
+  transition: all var(--nxd-transition);
+  box-sizing: border-box;
+  vertical-align: middle;
+}
+/* campo de linha única: alinha texto com ícone (evita texto “abaixo” do ícone) */
+input.nxd-input:not([type="checkbox"]):not([type="radio"]) {
+  height: 44px;
+  line-height: 44px;
+}
+/* textarea mantém altura automática */
+textarea.nxd-input {
+  min-height: 80px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+  line-height: 1.5;
+}
+/* inputs com ícone à esquerda (pl-10) — espaço para não sobrepor o ícone */
+.nxd-input.pl-10 {
+  padding-left: 2.75rem;
+}
+.nxd-input.pr-10 {
+  padding-right: 2.75rem;
+}
+
+.nxd-input:focus {
+  outline: none;
+  border-color: var(--nxd-navy);
+  box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.1);
+}
+
+.nxd-input::placeholder {
+  color: var(--nxd-gray-400);
+}
+
+/* Status badge */
+.nxd-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.nxd-badge-success {
+  background: rgba(22, 163, 74, 0.1);
+  color: var(--nxd-green);
+  border: 1px solid rgba(22, 163, 74, 0.2);
+}
+
+.nxd-badge-danger {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--nxd-red);
+  border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.nxd-badge-gray {
+  background: var(--nxd-gray-100);
+  color: var(--nxd-gray-600);
+  border: 1px solid var(--nxd-gray-200);
+}
+
+/* Status dot */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-online {
+  background: var(--nxd-green);
+}
+
+.status-offline {
+  background: var(--nxd-gray-400);
+}
+
+.status-error {
+  background: var(--nxd-red);
+}
+
+/* Animações sutis */
+@keyframes fadeIn {
   from {
-    transform: rotate(0deg);
+    opacity: 0;
+    transform: translateY(8px);
   }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Loading spinner simples */
+@keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--nxd-gray-200);
+  border-top-color: var(--nxd-navy);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* Headers consistentes */
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--nxd-gray-200);
+}
+
+.page-header-icon {
+  width: 48px;
+  height: 48px;
+  background: var(--nxd-navy);
+  color: white;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.page-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--nxd-gray-900);
+  margin: 0;
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: var(--nxd-gray-500);
+  margin: 4px 0 0 0;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 280px;
+  height: 100vh;
+  background: var(--nxd-white);
+  border-right: 1px solid var(--nxd-gray-200);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 24px;
+  border-bottom: 1px solid var(--nxd-gray-200);
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-logo-icon {
+  width: 40px;
+  height: 40px;
+  background: var(--nxd-navy);
+  color: white;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 4px;
+  color: var(--nxd-gray-600);
+  text-decoration: none;
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 14px;
+  transition: all var(--nxd-transition);
+}
+
+.nav-item:hover {
+  background: var(--nxd-gray-50);
+  color: var(--nxd-gray-900);
+}
+
+.nav-item.active {
+  background: rgba(30, 58, 138, 0.1);
+  color: var(--nxd-navy);
+}
+
+/* Responsivo */
+@media (max-width: 768px) {
+  .sidebar {
+    width: 100%;
+  }
+  
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
-.card {
-  padding: 2em;
-}
+/* Utilitários */
+.text-navy { color: var(--nxd-navy); }
+.text-green { color: var(--nxd-green); }
+.text-red { color: var(--nxd-red); }
+.text-gray { color: var(--nxd-gray-600); }
 
-.read-the-docs {
-  color: #888;
-}
+.bg-navy { background: var(--nxd-navy); }
+.bg-green { background: var(--nxd-green); }
+.bg-red { background: var(--nxd-red); }
+.bg-gray-50 { background: var(--nxd-gray-50); }
+.bg-white { background: var(--nxd-white); }
+
+.border-gray { border-color: var(--nxd-gray-200); }
+.border-navy { border-color: var(--nxd-navy); }

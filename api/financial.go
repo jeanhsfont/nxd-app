@@ -85,6 +85,11 @@ func UpsertBusinessConfigHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Erro ao salvar configuração", http.StatusInternalServerError)
 		return
 	}
+	entityID := "default"
+	if sectorID != nil {
+		entityID = sectorID.String()
+	}
+	LogAudit(userID, "upsert", "business_config", entityID, "", "ok", ClientIP(r))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -165,6 +170,7 @@ func UpsertTagMappingHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Erro ao salvar mapeamento", http.StatusInternalServerError)
 		return
 	}
+	LogAudit(userID, "upsert", "tag_mapping", body.AssetID, "", body.TagOK+","+body.TagNOK, ClientIP(r))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -263,6 +269,7 @@ func GetFinancialSummaryRangesHandler(w http.ResponseWriter, r *http.Request) {
 		{"today", time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())},
 		{"24h", now.Add(-24 * time.Hour)},
 		{"7d", now.Add(-7 * 24 * time.Hour)},
+		{"30d", now.Add(-30 * 24 * time.Hour)},
 	}
 	out := make(map[string]interface{})
 	for _, p := range periods {
@@ -272,6 +279,83 @@ func GetFinancialSummaryRangesHandler(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out[p.Key] = res
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+
+// GetFinancialExecutiveExportHandler — GET /api/financial-summary/export?period=7d|30d&sector_id=uuid
+// Retorna resumo para exportação CSV/PDF: período atual, período anterior (comparativo), perdas evitadas, custo parada evitado.
+func GetFinancialExecutiveExportHandler(w http.ResponseWriter, r *http.Request) {
+	userID, ok := r.Context().Value("userID").(int64)
+	if !ok {
+		http.Error(w, "Não autenticado", http.StatusUnauthorized)
+		return
+	}
+	factoryID, err := getFactoryIDForUser(userID)
+	if err != nil || factoryID == uuid.Nil {
+		http.Error(w, "Fábrica não encontrada", http.StatusNotFound)
+		return
+	}
+	nxdDB := store.NXDDB()
+	if nxdDB == nil {
+		http.Error(w, "Banco NXD indisponível", http.StatusServiceUnavailable)
+		return
+	}
+	period := r.URL.Query().Get("period")
+	if period == "" {
+		period = "7d"
+	}
+	sectorIDStr := r.URL.Query().Get("sector_id")
+	var sectorID *uuid.UUID
+	if sectorIDStr != "" {
+		u, _ := uuid.Parse(sectorIDStr)
+		sectorID = &u
+	}
+	now := time.Now()
+	var startCurrent, startPrevious time.Time
+	switch period {
+	case "30d":
+		startCurrent = now.Add(-30 * 24 * time.Hour)
+		startPrevious = now.Add(-60 * 24 * time.Hour)
+	case "24h":
+		startCurrent = now.Add(-24 * time.Hour)
+		startPrevious = now.Add(-48 * time.Hour)
+	default:
+		startCurrent = now.Add(-7 * 24 * time.Hour)
+		startPrevious = now.Add(-14 * 24 * time.Hour)
+	}
+	resCurrent, _, err := store.ComputeFinancialAggregate(nxdDB, factoryID, sectorID, startCurrent, now)
+	if err != nil {
+		log.Printf("[FinancialExport] current: %v", err)
+		http.Error(w, "Erro ao calcular resumo", http.StatusInternalServerError)
+		return
+	}
+	resPrevious, _, err := store.ComputeFinancialAggregate(nxdDB, factoryID, sectorID, startPrevious, startCurrent)
+	if err != nil {
+		resPrevious = nil
+	}
+	perdasEvitadas := 0.0
+	custoParadaEvitado := 0.0
+	if resPrevious != nil {
+		if resCurrent.PerdaRefugo < resPrevious.PerdaRefugo {
+			perdasEvitadas = resPrevious.PerdaRefugo - resCurrent.PerdaRefugo
+		}
+		if resCurrent.CustoParada < resPrevious.CustoParada {
+			custoParadaEvitado = resPrevious.CustoParada - resCurrent.CustoParada
+		}
+	}
+	out := map[string]interface{}{
+		"period":                period,
+		"period_start":          startCurrent,
+		"period_end":            now,
+		"faturamento_bruto":      resCurrent.FaturamentoBruto,
+		"perda_refugo":          resCurrent.PerdaRefugo,
+		"custo_parada":          resCurrent.CustoParada,
+		"perdas_evitadas":       perdasEvitadas,
+		"custo_parada_evitado":  custoParadaEvitado,
+		"sector_id":             sectorIDStr,
+		"previous_period":       resPrevious != nil,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)

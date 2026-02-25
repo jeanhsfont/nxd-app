@@ -614,6 +614,7 @@ func CreateSectorHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Erro ao criar setor", http.StatusInternalServerError)
 		return
 	}
+	LogAudit(userID, "create", "sector", sectorID, "", req.Name, ClientIP(r))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -668,6 +669,7 @@ func UpdateSectorHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Setor não encontrado ou não autorizado", http.StatusNotFound)
 		return
 	}
+	LogAudit(userID, "update", "sector", sectorID, "", req.Name, ClientIP(r))
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":          sectorID,
@@ -693,6 +695,7 @@ func DeleteSectorHandler(w http.ResponseWriter, r *http.Request) {
 	// Desagrupar assets do setor antes de deletar
 	nxdDB.Exec(`UPDATE nxd.assets SET group_id = NULL WHERE group_id = $1 AND factory_id = $2`, sectorID, factoryID)
 	nxdDB.Exec(`DELETE FROM nxd.sectors WHERE id = $1 AND factory_id = $2`, sectorID, factoryID)
+	LogAudit(userID, "delete", "sector", sectorID, "", "", ClientIP(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -792,6 +795,7 @@ func UpdateMachineAssetHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Erro ao atualizar ativo", http.StatusInternalServerError)
 		return
 	}
+	LogAudit(userID, "update", "asset", req.MachineID, "", req.DisplayName, ClientIP(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1155,12 +1159,22 @@ Use formatação Markdown. Seja objetivo e técnico. Responda em português bras
 	// Conta ativos e registros para metadata do relatório
 	nxdDB := store.NXDDB()
 	var assetCount, telemetryCount int
+	var factoryID uuid.UUID
 	if nxdDB != nil {
-		factoryID, ferr := getFactoryIDForUser(userID)
+		var ferr error
+		factoryID, ferr = getFactoryIDForUser(userID)
 		if ferr == nil {
 			nxdDB.QueryRow(`SELECT COUNT(*) FROM nxd.assets WHERE factory_id = $1`, factoryID).Scan(&assetCount)
 			nxdDB.QueryRow(`SELECT COUNT(*) FROM nxd.telemetry_log WHERE factory_id = $1 AND ts >= NOW() - INTERVAL '1 hour'`, factoryID).Scan(&telemetryCount)
 		}
+	}
+	sources := fmt.Sprintf("Relatório executivo. Setor: %s. Ativos: %d. Registros (1h): %d.", sectorID, assetCount, telemetryCount)
+	if sectorID == "" {
+		sources = fmt.Sprintf("Relatório executivo. Ativos: %d. Registros de telemetria (1h): %d.", assetCount, telemetryCount)
+	}
+	if db := GetDB(); db != nil {
+		title := "Relatório executivo"
+		saveIAReport(db, userID, factoryID.String(), title, analysis, sources)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1170,6 +1184,7 @@ Use formatação Markdown. Seja objetivo e técnico. Responda em português bras
 		"assets_count":       assetCount,
 		"telemetry_records":  telemetryCount,
 		"analysis":           analysis,
+		"sources":            sources,
 	})
 }
 // AnalyticsHandler — GET /api/analytics?api_key=XXX
@@ -1328,6 +1343,7 @@ func DeleteMachineHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Ativo não encontrado ou não autorizado", http.StatusNotFound)
 		return
 	}
+	LogAudit(userID, "delete", "asset", req.MachineID, "", "", ClientIP(r))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

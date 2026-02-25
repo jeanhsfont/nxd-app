@@ -1,14 +1,16 @@
+# NXD v1.0 — Build unificado (React + Go), mesmo Dockerfile do Cloud.
+# Teste local: docker-compose up --build nxd-server
 services:
   nxd-server:
     build:
       context: .
-      dockerfile: Dockerfile.nxd
+      dockerfile: Dockerfile.nxd-unified
     container_name: nxd-server
     ports:
       - "8080:8080"
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - ./data:/root/data
+      - ./logs:/root/logs
     environment:
       - PORT=8080
     networks:

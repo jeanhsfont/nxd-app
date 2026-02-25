@@ -1,9 +1,8 @@
+# Deploy e feito DIRETO no Google Cloud (scripts/deploy-nxd-gcp.ps1), nao por push no git.
 name: Deploy HubSystem/NXD to Google Cloud Run
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 env:
   PROJECT_ID: slideflow-prod
